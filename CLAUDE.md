@@ -60,6 +60,10 @@ The notebook `notebooks/model_watch.ipynb` is generated plain nbformat JSON; edi
 
 The viewer depends on these names; `normalize()` in `viewer.html` upgrades version 1 traces. If you change the schema, update the viewer and bump `version`.
 
+## Known gaps
+
+README.md has a "Known gaps" section written for the owner: it explains why closed models (Claude, ChatGPT, Copilot, Gemini) can't be watched, how the scale compares with lab tools, and what's unverified. Write it plainly, without jargon or hype. When a gap is closed (for example after the first real-model run, or after adding attribution graphs), update that section in the same change.
+
 ## Ideas for next steps
 
 - Live streaming into the full viewer (local web server with server-sent events; in Colab, `google.colab.output.serve_kernel_port_as_iframe`).

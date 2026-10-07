@@ -62,7 +62,65 @@ Memory figures are estimates for bfloat16 weights plus four 16k-feature dictiona
 - **Labels.** Black text is a Neuronpedia label. Gray "pushes toward" text is computed from the model's own weights and costs nothing. It is usually clearer at later layers.
 - **Settled at layer N.** Factual words often settle mid-to-late; small grammar words can settle early or stay undecided until the end.
 - **Says vs. active.** Ask the model to explain its reasoning, then light up concepts across that explanation. Agreement is evidence the explanation is faithful; mismatches are the gap current research studies.
-- **Limits.** Watching shows what is active: strong evidence about why, not proof. Concrete topics read clearly; abstract multi-step reasoning is the hardest case for every current tool. Early-layer logit-lens guesses are rough.
+- **Limits.** See [Known gaps](#known-gaps) below.
+
+## Known gaps
+
+What Model Watch can't do, how it compares to the tools AI labs use on their own models, and why.
+
+### It can't watch Claude, ChatGPT, Copilot or Gemini
+
+Watching a model's layers requires its weights, the files that make up the model. Anthropic, OpenAI, Google and Microsoft keep the weights of their chat products private, so nobody outside those companies can look inside them. From outside you only get the text a model writes. Some services also report how likely each word was, which could fill the "choice" panel and nothing else.
+
+A model's visible "thinking" or reasoning text doesn't help here either. It's more text the model wrote, not a view of what happened inside. Whether that text matches what's really going on is an open research question, and it's one of the things Model Watch helps you check on open models.
+
+### The method is the same, but the scale is far smaller
+
+The labs use the same kind of tools on their own models. Anthropic, for example, has published this sort of analysis on Claude. The difference is size:
+
+| | Model Watch (Gemma 3 4B) | Lab tools on their own models |
+|---|---|---|
+| Model size | 4 billion parameters | Not disclosed, likely far larger |
+| Concepts per layer | About 16,000, at 4 layers | Millions (Anthropic reported 34 million on Claude 3 Sonnet in 2024) |
+| Labels | Some written labels, plus "pushes toward" words | Large-scale labeling, checked by researchers |
+
+With fewer concepts, each one is broader. Model Watch might show a single "AI and technology" concept where a lab tool would separate "interpretability research" from "AI policy".
+
+### It shows what's active, not what caused the word
+
+When a concept lights up as a word is written, that's strong evidence it played a part, but it isn't proof. Two things can happen together without one causing the other. Researchers prove cause by switching a concept off and checking whether the word changes. Model Watch deliberately doesn't change the model, so it can't run that test.
+
+### It doesn't show how concepts connect
+
+You can see which concepts were active, but not which ones fed into which. The labs' wiring diagrams, called attribution graphs, show that. The public tool for building them is circuit-tracer (github.com/decoderesearch/circuit-tracer), and it supports Gemma 3. It isn't built into Model Watch yet.
+
+### Labels can be wrong or missing
+
+- Neuronpedia labels are written by an AI from examples where each concept fired. They are usually close, sometimes wrong, and many concepts have none. For the 4B model they only exist at layer 17.
+- The gray "pushes toward" words are calculated from the model itself, so they're always available. But they only describe which words a concept makes more likely, not what it means. They're noisy at early layers, where concepts are more about spelling and grammar than meaning.
+
+### Early layers give rough guesses
+
+The "how the guess formed" chart reads every layer as if it were the last one. Later layers are built for that and read well. Early layers aren't, so their guesses can look random even when the layer is doing useful work. Look at the overall trend, not the first few rows.
+
+### Complex thinking is the hardest to read
+
+Concrete things like places, names, code and dates show up clearly. Abstract, multi-step reasoning, like weighing an argument or planning an answer, spreads across many concepts and many words. That's the hardest case for every current tool, including the labs' own.
+
+### Not yet run on the real models
+
+Everything has been tested on tiny, randomly built versions of Gemma 2 and Gemma 3. These have the same structure as the real models, but they're small enough to run without downloading anything. The first real run may surface small problems:
+
+- **Dictionary file format.** The concept dictionaries are Google's files. If their internal names differ from what the loader expects, the error message lists them, and the fix is one line in `model_watch/sae.py`.
+- **12B on two GPUs.** Splitting the 12B model across two GPUs (Kaggle) is written but untested.
+
+### Closest stand-ins for the big closed models
+
+| Open model | Why it's the closest | Free? |
+|---|---|---|
+| Gemma 3 27B chat | Full Gemma Scope 2 dictionaries, plus Anthropic's Natural Language Autoencoders on Neuronpedia, which turn a layer's activity into plain sentences | No, needs a large rented GPU |
+| GPT-OSS 20B | OpenAI's open-weight model, so the nearest look at an OpenAI-made model. circuit-tracer has a published dictionary for it | Unconfirmed; Model Watch would also need support for that dictionary format |
+| Llama 3.3 70B | Natural Language Autoencoders available on Neuronpedia | No, too large |
 
 ## Project layout
 
