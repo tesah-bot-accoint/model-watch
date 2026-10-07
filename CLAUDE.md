@@ -4,62 +4,66 @@ Context for Claude Code working in this repo.
 
 ## What this is
 
-Model Watch lets a person watch Gemma-2 2B generate text token by token and see why each token was chosen: the final choice and runners-up, a per-layer logit lens, and the top Gemma Scope SAE features at one layer with Neuronpedia labels.
+Model Watch lets a person chat with a Gemma model and watch each reply form token by token: the choice and runners-up, a per-layer logit lens, and Gemma Scope SAE features at four layers. A one-screen replay viewer adds a whole-reply concept timeline that can highlight where any concept was active in the text.
 
-The owner wants to **observe the model while it runs**, not ablate or steer it. Keep the default experience observe-only. Interventions can be added later as a separate, opt-in feature.
+The owner wants to **observe the model while it runs**, not ablate or steer it, and wants everything **free to run** (Colab T4, Kaggle 2x T4, or CPU). Keep the default experience observe-only; interventions can be added later as an opt-in feature. The viewer must stay a **single screen** on laptops (no page scroll; panels scroll internally). The owner rejected a long scrolling layout.
 
 ## Commands
 
 ```bash
 pip install -r requirements.txt            # or: pip install -e .
-python -m unittest discover -s tests -v    # no downloads, runs on a tiny random Gemma 2
-python watch.py --prompt "The capital of France is"   # needs HF_TOKEN and Gemma license accepted
-python watch.py --prompt "..." --html run.html --json run.json
+python -m unittest discover -s tests -v    # offline; tiny random Gemma 2, Gemma 3 text and Gemma 3 multimodal
+python watch.py --prompt "Is AI a black box?"                   # needs HF_TOKEN + Gemma licenses accepted
+python watch.py --interactive --compact --html chat.html
 ```
+
+The notebook `notebooks/model_watch.ipynb` is generated plain nbformat JSON; edit carefully and keep every code cell parseable.
 
 ## Layout
 
-- `model_watch/core.py`: `WatchConfig`, `ModelWatcher` (`load`, `step`, `watch`, `trace`), `settled_layer`.
-- `model_watch/sae.py`: `JumpReLUSAE` loading Gemma Scope `params.npz` (keys `W_enc, W_dec, b_enc, b_dec, threshold`).
-- `model_watch/labels.py`: `NeuronpediaLabels`, best-effort labels with a disk cache in `~/.cache/model-watch` (override with `MODEL_WATCH_CACHE`).
-- `model_watch/render.py`: `format_step` (terminal) and `step_html` (Jupyter/Colab live panel).
-- `model_watch/export.py`: `save_json`, `export_html`, `trace_to_html` (injects JSON into `viewer.html` at the `/*__TRACE_JSON__*/null` placeholder).
-- `model_watch/viewer.html`: single-file replay viewer. Opened directly, it shows an illustrative sample with a banner.
-- `watch.py`: CLI. `notebooks/model_watch_colab.ipynb`: Colab walkthrough (generated; edit carefully, it is plain nbformat JSON).
+- `model_watch/core.py`: `PRESETS`, `WatchConfig` (preset defaults fill any `None` field; `.resolved()`), `ModelWatcher` (`load`, `encode`, `step`, `watch`, `trace`, `add_labels`, `promotes`), `settled_layer`, `feature_key`.
+- `model_watch/sae.py`: `JumpReLUSAE`; `from_gemma_scope_1` (npz), `from_gemma_scope_2` (safetensors); `normalize_params` accepts key spellings like `w_enc`/`W_enc` and fixes transposed matrices using `b_dec`'s length.
+- `model_watch/labels.py`: `NeuronpediaLabels` (disk cache in `~/.cache/model-watch`, thread-safe, failures never cached, disables itself after 3 network failures).
+- `model_watch/render.py`: `format_step` (terminal), `step_html` (notebook live panel), `describe`.
+- `model_watch/export.py`: `save_json`, `export_html`, `trace_to_html` (injects JSON at `/*__TRACE_JSON__*/null`).
+- `model_watch/viewer.html`: one-screen replay viewer; opened directly it shows an illustrative sample with a banner. Reads trace versions 1 and 2.
+- `watch.py`: CLI (`--preset`, `--interactive`, `--compact`, `--quiet`, `--device-map auto`, `--sae-layers`).
 
 ## Decisions and gotchas
 
-- **No TransformerLens.** TransformerLens 4.0 removed `HookedTransformer.from_pretrained`. We use plain `transformers` with forward hooks on each decoder layer, which captures the residual stream after each layer (resid_post) at the last position.
-- **Do not use `output_hidden_states` for the last layer.** In HF Gemma 2 the final `hidden_states` entry already has the final norm applied; the others do not. Hooks avoid the mismatch. A test checks hooked outputs equal `hidden_states[1:-1]`.
-- **Logit lens** = `final_norm` -> `lm_head` -> Gemma's final logit soft-cap (`config.final_logit_softcapping`, 30.0) -> softmax. At the last layer it matches the real prediction exactly (tested).
-- Load Gemma 2 with `attn_implementation="eager"`. `transformers` renamed `torch_dtype` to `dtype` in 4.56; `_dtype_kwarg()` handles both.
-- `dtype="auto"` picks bfloat16 on GPUs that support it, else float32. Avoid float16 for Gemma 2 (overflow).
-- **SAE choice.** Default is `google/gemma-scope-2b-pt-res`, `layer_20/width_16k/average_l0_71`. The repo's `canonical` folders were deleted. Neuronpedia's `20-gemmascope-res-16k` is assumed to match L0 71 (closest to 100); this was not verified from source. If labels look unrelated to what fires, try other L0 values.
-- **Neuronpedia API**: `GET https://www.neuronpedia.org/api/feature/{model}/{source}/{index}`. The response schema was not verified; `parse_label` reads `explanations[0].description` with fallbacks. After 3 network failures labels switch off for the session. Failures are never cached.
-- Gemma Scope SAEs were trained on the base model, so default to `google/gemma-2-2b`, not `-it`.
-- Generation is greedy and re-runs the full sequence each step (no KV cache). Simple and fine for short prompts.
-- Tests must keep running offline on the tiny random model. Do not add tests that download weights.
+- **No TransformerLens.** 4.0 removed `HookedTransformer.from_pretrained`. Plain `transformers` with forward hooks on each decoder layer captures resid_post at the last position. This matches Gemma Scope 2's `hf_hook_point_in: model.layers.N.output`.
+- **Finding layers.** Gemma 3 4B/12B load as multimodal `Gemma3ForConditionalGeneration` (layers at `model.language_model.layers`); 1B is text-only `Gemma3ForCausalLM`. `_decoder()` handles both. `load()` tries `AutoModelForCausalLM`, then `AutoModelForImageTextToText`.
+- **Do not use `output_hidden_states` for the last layer**: HF stores it post-norm. Tests check hooked outputs equal `hidden_states[1:-1]`.
+- **Logit lens** = final norm, then `lm_head`, then soft-cap if `get_text_config().final_logit_softcapping` is set (Gemma 2: 30; Gemma 3: none), then softmax. Matches the real prediction at the last layer (tested).
+- **KV cache.** `watch(use_cache=True)` feeds only the new token after the first step. Tests confirm identical tokens, lens and features versus full recompute on all three tiny model types, including sliding-window attention.
+- **Multi-GPU.** With `device_map="auto"`, hooks move captured activations to `self.home` (the `lm_head` device); SAEs live there too. Untested on real multi-GPU hardware.
+- `dtype="auto"`: bfloat16 on any CUDA GPU (emulated on T4), float32 on CPU/MPS. Never float16 automatically.
+- **Gemma Scope 2 paths**: `google/gemma-scope-2-{size}-it/resid_post/layer_{L}_width_16k_l0_medium/params.safetensors` (each folder also has a large `examples.safetensors` we do not download). Main `resid_post` has 4 layers per model; `resid_post_all` has every layer but only l0 small/big. The tensor key names inside `params.safetensors` were not verified from here; `normalize_params` handles common spellings and raises with the actual key list if none match.
+- **Neuronpedia** sources verified to match the medium-L0 16k SAEs: `gemma-3-4b-it/17-gemmascope-2-res-16k`, `gemma-3-1b-it/13-...`, `gemma-3-12b-it/12-...`. Many 4B features have no explanation yet, which is why `promotes` (top tokens of `W_dec[f] @ W_U`) exists as a free label at every layer. API: `GET /api/feature/{model}/{source}/{index}`; response schema not verified, `parse_label` reads `explanations[0].description` with fallbacks.
+- Labels are fetched after generation by `add_labels` (parallel, capped, most-active first) so live display never waits on the network.
+- Stop tokens: tokenizer EOS plus `<end_of_turn>`. Steps carry `stop: true`; `reply` excludes them.
+- Tests must stay offline on tiny random models. Do not add tests that download weights.
 
-## Trace JSON (version 1)
+## Trace JSON (version 2)
 
 ```
-{ version, created, meta: {model, sae, sae_layer, neuronpedia_source, device, dtype, n_layers},
-  prompt, prompt_tokens: [str],
-  steps: [ { index, token, token_id, prob,
+{ version: 2, created, prompt, messages|null, prompt_tokens, reply,
+  meta: {preset, model, sae, sae_layers, labeled_layers, neuronpedia_model, neuronpedia_sources, device, dtype, chat, n_layers},
+  steps: [ { index, token, token_id, prob, stop,
              alternatives: [{token, token_id, prob}],
              lens: [{layer, top_token, top_prob, chosen_prob}],
-             settled_layer,                 # int or null
-             features: [{index, activation, label, url}],
-             active_count } ] }
+             settled_layer,                               # int or null
+             features: {"<layer>": [{index, activation}]},
+             active_count: {"<layer>": int} } ],
+  feature_info: {"<layer>:<index>": {layer, index, label|null, promotes: [str], url|null}} }
 ```
 
-The viewer depends on these field names. If you change them, update `viewer.html` and bump `version`.
+The viewer depends on these names; `normalize()` in `viewer.html` upgrades version 1 traces. If you change the schema, update the viewer and bump `version`.
 
 ## Ideas for next steps
 
-- KV-cache generation for speed on longer outputs.
-- Features at several layers (for example 6, 12, 20) to show concepts forming over depth.
-- A live local web viewer for the home lab (stream steps over a websocket instead of replaying after).
+- Live streaming into the full viewer (local web server with server-sent events; in Colab, `google.colab.output.serve_kernel_port_as_iframe`).
+- Per-word attribution graphs via circuit-tracer (github.com/decoderesearch/circuit-tracer), which supports Gemma 3 transcoders from Gemma Scope 2.
+- Use each SAE folder's `examples.safetensors` (top activating examples) as an offline label source.
 - Tuned lens for more faithful early-layer readings.
-- Per-token attribution graphs via `circuit-tracer` (github.com/decoderesearch/circuit-tracer) for "pause and inspect this word".
-- Side-by-side comparison of two prompts.
+- Side-by-side comparison of two prompts or two layers.

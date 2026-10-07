@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -61,6 +62,7 @@ class NeuronpediaLabels:
         self.max_failures = max_failures
         self.log = log
         self._failures = 0
+        self._lock = threading.Lock()
         self._path = _cache_dir() / f"labels-{model_id}-{source_id}.json"
         try:
             self._cache: dict[str, str | None] = json.loads(self._path.read_text())
@@ -70,7 +72,14 @@ class NeuronpediaLabels:
     def url(self, index: int) -> str:
         return PAGE.format(model=self.model_id, source=self.source_id, index=index)
 
-    def get(self, index: int) -> str | None:
+    def cached(self, index: int) -> str | None:
+        """Label from the disk cache only. Never touches the network."""
+        return self._cache.get(str(index))
+
+    def is_cached(self, index: int) -> bool:
+        return str(index) in self._cache
+
+    def get(self, index: int, save: bool = True) -> str | None:
         key = str(index)
         if key in self._cache:
             return self._cache[key]
@@ -78,9 +87,14 @@ class NeuronpediaLabels:
             return None
         ok, label = self._fetch(index)
         if ok:  # cache real answers, including "no label"; never cache network failures
-            self._cache[key] = label
-            self._save()
+            with self._lock:
+                self._cache[key] = label
+            if save:
+                self.save()
         return label
+
+    def save(self) -> None:
+        self._save()
 
     def _fetch(self, index: int) -> tuple[bool, str | None]:
         url = API.format(model=self.model_id, source=self.source_id, index=index)
@@ -92,15 +106,25 @@ class NeuronpediaLabels:
                 data = json.loads(resp.read().decode("utf-8"))
             self._failures = 0
             return True, parse_label(data)
+        except urllib.error.HTTPError as err:
+            if err.code == 404:  # feature exists but has no page data: a real "no label"
+                return True, None
+            return self._failed(err)
         except (urllib.error.URLError, TimeoutError, ValueError, OSError) as err:
+            return self._failed(err)
+
+    def _failed(self, err) -> tuple[bool, None]:
+        with self._lock:
             self._failures += 1
-            if self._failures >= self.max_failures:
+            if self._failures >= self.max_failures and self.enabled:
                 self.enabled = False
-                self.log(f"[labels] Neuronpedia unreachable ({err}); continuing without labels.")
-            return False, None
+                self.log(f"[labels] Neuronpedia unreachable ({err}); continuing without its labels.")
+        return False, None
 
     def _save(self) -> None:
+        with self._lock:
+            data = json.dumps(self._cache)
         try:
-            self._path.write_text(json.dumps(self._cache))
+            self._path.write_text(data)
         except OSError:
             pass

@@ -7,251 +7,525 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
 <style>
-/* Layout: a running-text strip and transport bar on top; below, the decision (left) and the layer-by-layer formation (right). Teal = the chosen word, copper = concepts. */
+/* Layout: one-screen dashboard on laptops and desktops. Top: controls. Middle row: conversation + choice | concepts per layer | how the guess formed. Bottom strip: whole-reply concept timeline. Panels scroll inside themselves; the page never scrolls. Phones stack. Teal = chosen word, copper = concepts. */
 :root{
-  --bg:#F3F6F6; --surface:#FFFFFF; --fg:#16232A; --muted:#586A73; --line:#D6E0E3; --track:#E4EBED;
-  --accent:#0D7A69; --accent-soft:#D6EFEA; --warm:#B85E24; --warm-soft:#F6E4D7; --warn-bg:#FFF4D6; --warn-fg:#6B4E00;
+  --bg:#F3F6F6; --surface:#FFFFFF; --fg:#16232A; --muted:#586A73; --line:#D6E0E3; --track:#E7EDEF;
+  --accent:#0D7A69; --accent-soft:#D6EFEA; --warm:#B85E24; --warm-rgb:184, 94, 36; --warn-bg:#FFF4D6; --warn-fg:#6B4E00;
   --font-body:"Instrument Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
   --font-mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
   color-scheme:light;
 }
 @media (prefers-color-scheme: dark){
   :root:not([data-theme="light"]){
-    --bg:#0D1416; --surface:#141F23; --fg:#E2EBED; --muted:#8EA2AA; --line:#25353A; --track:#203036;
-    --accent:#4CC4AD; --accent-soft:#163832; --warm:#E8995F; --warm-soft:#3A281C; --warn-bg:#3A3112; --warn-fg:#F2D88A;
+    --bg:#0D1416; --surface:#141F23; --fg:#E2EBED; --muted:#8EA2AA; --line:#25353A; --track:#1D2B30;
+    --accent:#4CC4AD; --accent-soft:#163832; --warm:#E8995F; --warm-rgb:232, 153, 95; --warn-bg:#3A3112; --warn-fg:#F2D88A;
     color-scheme:dark;
   }
 }
 :root[data-theme="dark"]{
-  --bg:#0D1416; --surface:#141F23; --fg:#E2EBED; --muted:#8EA2AA; --line:#25353A; --track:#203036;
-  --accent:#4CC4AD; --accent-soft:#163832; --warm:#E8995F; --warm-soft:#3A281C; --warn-bg:#3A3112; --warn-fg:#F2D88A;
+  --bg:#0D1416; --surface:#141F23; --fg:#E2EBED; --muted:#8EA2AA; --line:#25353A; --track:#1D2B30;
+  --accent:#4CC4AD; --accent-soft:#163832; --warm:#E8995F; --warm-rgb:232, 153, 95; --warn-bg:#3A3112; --warn-fg:#F2D88A;
   color-scheme:dark;
 }
 *{box-sizing:border-box}
 html,body{margin:0}
-body{background:var(--bg);color:var(--fg);font-family:var(--font-body);font-size:15px;line-height:1.5;padding-block:20px 48px;padding-inline:16px}
-.wrap{max-width:1080px;margin-inline:auto;display:flex;flex-direction:column;gap:16px}
+body{background:var(--bg);color:var(--fg);font-family:var(--font-body);font-size:14.5px;line-height:1.45;padding-block:12px 16px;padding-inline:16px}
 button,select,input{font:inherit;color:inherit}
 :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .mono{font-family:var(--font-mono)}
-header{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:flex-end;gap:12px}
-h1{margin:0;font-size:1.5rem;font-weight:600;letter-spacing:-0.01em}
-.meta{margin-top:4px;color:var(--muted);font-size:13px;display:flex;flex-wrap:wrap;gap:4px 14px}
-.open{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--line);background:var(--surface);border-radius:6px;padding:7px 12px;cursor:pointer;font-size:13px}
+
+.app{display:flex;flex-direction:column;gap:10px;max-width:1600px;margin-inline:auto}
+.top{display:flex;flex-wrap:wrap;align-items:center;gap:8px 16px}
+.brand{display:flex;flex-direction:column;min-width:0;flex:0 1 auto}
+h1{margin:0;font-size:1.15rem;font-weight:600;letter-spacing:-0.01em;white-space:nowrap}
+.meta{color:var(--muted);font-size:12px;display:flex;flex-wrap:wrap;gap:0 12px;min-width:0}
+.meta span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:26rem}
+.transport{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;flex:1 1 420px;min-width:0}
+.btns{display:flex;gap:5px}
+.tb{border:1px solid var(--line);background:var(--surface);border-radius:6px;min-width:34px;height:32px;padding:0 9px;cursor:pointer;font-size:13px}
+.tb:hover{border-color:var(--accent)}
+.tb.play{background:var(--accent);border-color:var(--accent);color:var(--surface);min-width:68px;font-weight:600}
+.slider{flex:1 1 160px;accent-color:var(--accent);min-width:0}
+.pos{font-family:var(--font-mono);font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap}
+.speed{border:1px solid var(--line);background:var(--surface);border-radius:6px;height:32px;padding:0 6px;font-size:12.5px}
+.open{display:inline-flex;align-items:center;border:1px solid var(--line);background:var(--surface);border-radius:6px;padding:0 10px;height:32px;cursor:pointer;font-size:12.5px;position:relative;white-space:nowrap}
 .open:hover{border-color:var(--accent)}
 .open input{position:absolute;width:1px;height:1px;opacity:0}
-.banner{background:var(--warn-bg);color:var(--warn-fg);border-radius:6px;padding:9px 12px;font-size:13.5px}
+.banner{background:var(--warn-bg);color:var(--warn-fg);border-radius:6px;padding:6px 10px;font-size:12.5px}
 .err{color:var(--warm);font-size:13px}
-.card{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px 16px;min-width:0}
-.card h2{margin:0 0 2px;font-size:14px;font-weight:600}
-.card .sub{margin:0 0 12px;color:var(--muted);font-size:12.5px}
-.text{font-size:17px;line-height:1.75;white-space:pre-wrap;overflow-wrap:anywhere}
+
+.main{display:grid;grid-template-columns:minmax(0,1fr);gap:10px}
+.col{display:flex;flex-direction:column;gap:10px;min-width:0;min-height:0}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:9px;padding:10px 12px;min-width:0;min-height:0;display:flex;flex-direction:column}
+.card h2{margin:0;font-size:13px;font-weight:600}
+.card .sub{margin:1px 0 8px;color:var(--muted);font-size:12px}
+.scroll{overflow:auto;min-height:0}
+
+.who{font-size:10.5px;letter-spacing:.07em;text-transform:uppercase;color:var(--muted);margin:0 0 2px}
+.you{white-space:pre-wrap;overflow-wrap:anywhere;margin:0 0 8px;max-height:5.5em;overflow:auto;color:var(--muted);font-size:13.5px}
+.text{font-size:15.5px;line-height:1.75;white-space:pre-wrap;overflow-wrap:anywhere;overflow:auto;min-height:3em}
 .text .p{color:var(--muted)}
 .tk{border:0;background:transparent;padding:1px 0;border-radius:3px;cursor:pointer;white-space:pre-wrap;font-size:inherit;line-height:inherit}
-.tk:hover{background:var(--track)}
-.tk.cur{background:var(--accent-soft);color:var(--accent);box-shadow:0 0 0 2px var(--accent-soft)}
-.caret{display:inline-block;width:2px;height:1.1em;background:var(--accent);vertical-align:-0.18em;margin-left:1px}
-.transport{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px}
-.btns{display:flex;gap:6px}
-.tb{border:1px solid var(--line);background:var(--surface);border-radius:6px;min-width:38px;height:36px;padding:0 10px;cursor:pointer;font-size:14px}
-.tb:hover{border-color:var(--accent)}
-.tb.play{background:var(--accent);border-color:var(--accent);color:var(--surface);min-width:76px;font-weight:600}
-.slider{flex:1 1 220px;accent-color:var(--accent);min-width:0}
-.pos{font-family:var(--font-mono);font-size:12.5px;color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap}
-.speed{border:1px solid var(--line);background:var(--surface);border-radius:6px;height:36px;padding:0 8px;font-size:13px}
-.grid{display:grid;grid-template-columns:minmax(0,5fr) minmax(0,7fr);gap:16px;align-items:start}
-.col{display:flex;flex-direction:column;gap:16px;min-width:0}
-.chosen{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:12px}
-.big{font-family:var(--font-mono);font-size:1.7rem;font-weight:500;color:var(--accent);background:var(--accent-soft);border-radius:6px;padding:2px 10px}
-.pct{font-size:1.1rem;font-variant-numeric:tabular-nums}
-.pct small{color:var(--muted);font-size:12.5px}
-.rows{display:flex;flex-direction:column;gap:7px}
-.row{display:grid;grid-template-columns:minmax(0,9rem) minmax(0,1fr) 3.4rem;gap:10px;align-items:center;font-size:13px}
+.tk:hover{outline:1px solid var(--line)}
+.tk.future{opacity:.38}
+.tk.cur{background:var(--accent-soft);color:var(--accent);box-shadow:0 0 0 2px var(--accent-soft);opacity:1}
+.hl{display:flex;flex-wrap:wrap;align-items:center;gap:6px 8px;margin-top:6px;font-size:12.5px}
+.chip{display:inline-flex;align-items:center;gap:6px;background:rgba(var(--warm-rgb),.14);border-radius:999px;padding:2px 4px 2px 10px;max-width:100%;min-width:0}
+.chip span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.chip button{border:0;background:transparent;cursor:pointer;color:var(--muted);padding:0 6px;font-size:13px}
+
+.chosen{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:8px}
+.big{font-family:var(--font-mono);font-size:1.35rem;font-weight:500;color:var(--accent);background:var(--accent-soft);border-radius:6px;padding:1px 9px;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pct{font-size:1rem;font-variant-numeric:tabular-nums}
+.pct small{color:var(--muted);font-size:12px}
+.rows{display:flex;flex-direction:column;gap:5px}
+.row{display:grid;grid-template-columns:minmax(0,8rem) minmax(0,1fr) 3.2rem;gap:8px;align-items:center;font-size:12.5px}
 .row .lab{font-family:var(--font-mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.track{display:block;height:8px;background:var(--track);border-radius:4px;overflow:hidden}
+.track{display:block;height:7px;background:var(--track);border-radius:4px;overflow:hidden}
 .fill{display:block;height:100%;background:var(--muted);border-radius:4px}
 .fill.a{background:var(--accent)} .fill.w{background:var(--warm)}
-.num{text-align:right;font-family:var(--font-mono);font-variant-numeric:tabular-nums;font-size:12.5px}
-.concept{display:grid;grid-template-columns:4.6rem 5rem minmax(0,1fr);gap:10px;align-items:center;font-size:13.5px;padding:3px 0}
-.concept a{color:var(--warm);font-family:var(--font-mono);font-size:12.5px;text-decoration:none}
-.concept a:hover{text-decoration:underline}
-.concept .idx{font-family:var(--font-mono);font-size:12.5px;color:var(--muted)}
-.concept .nolab{color:var(--muted);font-style:italic}
-.empty{color:var(--muted);font-size:13px}
-.chartbox{min-width:0}
+.num{text-align:right;font-family:var(--font-mono);font-variant-numeric:tabular-nums;font-size:12px}
+
+.layerblock + .layerblock{margin-top:8px;padding-top:7px;border-top:1px solid var(--line)}
+.layerblock h3{margin:0 0 3px;font-size:12.5px;font-weight:600}
+.layerblock h3 small{font-weight:400;color:var(--muted)}
+.concept{display:grid;grid-template-columns:4.6rem 3rem minmax(0,1fr);gap:8px;align-items:center;font-size:12.5px;padding:2px 4px;border:0;background:transparent;text-align:left;width:100%;border-radius:4px;cursor:pointer}
+.concept:hover{background:var(--track)}
+.concept.sel{background:rgba(var(--warm-rgb),.16)}
+.concept .idx{font-family:var(--font-mono);font-size:11.5px;color:var(--warm)}
+.concept .desc{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.concept .desc.pt{color:var(--muted)}
+.links{font-size:12px;color:var(--muted);margin-top:6px}
+.links a{color:var(--warm)}
+.empty{color:var(--muted);font-size:12.5px;margin:0}
+
 svg.chart{display:block;width:100%;height:auto}
 svg.chart text{font-family:var(--font-mono);font-size:10px;fill:var(--muted)}
 svg.chart .grid{stroke:var(--line);stroke-width:1}
 svg.chart .bar{fill:var(--track)} svg.chart .bar.hit{fill:var(--accent)}
 svg.chart .mark{stroke:var(--warm);stroke-width:1.5;stroke-dasharray:4 3}
 svg.chart text.marklab{fill:var(--warm);font-weight:500}
-.summary{margin:10px 0 0;font-size:13.5px}
+.summary{margin:6px 0 0;font-size:12.5px}
 .summary b{color:var(--accent);font-weight:600}
-.tablewrap{max-height:300px;overflow:auto;margin-top:12px;border-top:1px solid var(--line)}
-table{width:100%;border-collapse:collapse;font-size:12.5px}
-th,td{text-align:left;padding:5px 8px;border-bottom:1px solid var(--line);white-space:nowrap}
+details{margin-top:8px}
+summary{cursor:pointer;font-size:12.5px;color:var(--muted)}
+.tablewrap{max-height:260px;overflow:auto;margin-top:6px;border-top:1px solid var(--line)}
+table{width:100%;border-collapse:collapse;font-size:12px}
+th,td{text-align:left;padding:3px 8px;border-bottom:1px solid var(--line);white-space:nowrap}
 th{position:sticky;top:0;background:var(--surface);color:var(--muted);font-weight:500}
 td.n{text-align:right;font-family:var(--font-mono);font-variant-numeric:tabular-nums}
-td.g{font-family:var(--font-mono);max-width:12rem;overflow:hidden;text-overflow:ellipsis}
+td.g{font-family:var(--font-mono);max-width:11rem;overflow:hidden;text-overflow:ellipsis}
 tr.hit td.g{color:var(--accent)}
 tr.set td{background:var(--accent-soft)}
-.keys{color:var(--muted);font-size:12px}
-@media (max-width:820px){.grid{grid-template-columns:minmax(0,1fr)}}
-@media (prefers-reduced-motion:no-preference){.fill{transition:width .25s ease}}
+
+.tlhead{display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px;margin-bottom:6px}
+.tlhead .sub{margin:0;flex:1 1 260px}
+.pills{display:flex;flex-wrap:wrap;gap:5px}
+.pill{border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:1px 10px;cursor:pointer;font-size:12.5px}
+.pill[aria-pressed="true"]{background:var(--fg);color:var(--surface);border-color:var(--fg)}
+.pill small{opacity:.7}
+.find{border:1px solid var(--line);background:var(--surface);border-radius:6px;padding:3px 9px;font-size:12.5px;width:min(220px,100%)}
+.tl{display:grid;grid-template-columns:minmax(0,15rem) minmax(0,1fr);gap:0 8px;overflow-y:auto;min-height:0}
+.tllabels{display:flex;flex-direction:column}
+.tllabels .spacer{height:16px;flex:none}
+.rowlab{height:18px;flex:none;border:0;background:transparent;text-align:left;padding:0 6px;font-size:12px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;border-radius:4px;display:block;width:100%;line-height:18px}
+.rowlab:hover{background:var(--track)}
+.rowlab.sel{background:rgba(var(--warm-rgb),.18)}
+.rowlab .pt{color:var(--muted)}
+.tlscroll{overflow-x:auto;min-width:0}
+.tlscroll canvas{display:block;cursor:crosshair}
+.tlinfo{margin-top:4px;font-size:12px;color:var(--muted);min-height:1.4em;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+/* One screen: laptops and desktops */
+@media (min-width:1000px) and (min-height:620px){
+  html,body{height:100%}
+  body{overflow:hidden}
+  .app{height:100%}
+  .main{flex:1 1 0;min-height:0;grid-template-columns:minmax(0,1.15fr) minmax(0,1fr) minmax(0,1fr)}
+  .main > .col, .main > .card{min-height:0}
+  .textcard{flex:1 1 0}
+  .choicecard{flex:0 0 auto}
+  .timeline{flex:0 0 34%}
+  .concepts-card #concepts, .lens-card .scroll{flex:1 1 0}
+}
+/* Phones and narrow windows: stack and scroll normally */
+@media not all and (min-width:1000px) and (min-height:620px){
+  .main{grid-template-columns:minmax(0,1fr)}
+  .text{max-height:20em}
+  .tl{max-height:24rem}
+}
+@media (min-width:700px) and (max-width:999.98px){
+  .main{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+  .main > .col:first-child{grid-column:1 / -1}
+}
+@media (max-width:560px){.tl{grid-template-columns:minmax(0,8.5rem) minmax(0,1fr)}}
+@media (prefers-reduced-motion:no-preference){.fill{transition:width .2s ease}}
 </style>
 </head>
 <body>
-<div class="wrap">
-  <header>
-    <div>
+<div class="app">
+  <header class="top">
+    <div class="brand">
       <h1>Model Watch</h1>
       <div class="meta" id="meta"></div>
     </div>
+    <div class="transport" title="Space plays or pauses. Arrow keys step. Esc clears a highlighted concept.">
+      <div class="btns">
+        <button class="tb" id="first" type="button" aria-label="First word">⏮</button>
+        <button class="tb" id="prev" type="button" aria-label="Previous word">◀</button>
+        <button class="tb play" id="play" type="button">Play</button>
+        <button class="tb" id="next" type="button" aria-label="Next word">▶</button>
+      </div>
+      <input class="slider" id="slider" type="range" min="0" max="0" value="0" aria-label="Word position">
+      <span class="pos" id="pos"></span>
+      <select class="speed" id="speed" aria-label="Playback speed">
+        <option value="1600">Slow</option>
+        <option value="700" selected>Normal</option>
+        <option value="250">Fast</option>
+      </select>
+    </div>
     <label class="open" for="file">Open trace.json<input id="file" type="file" accept=".json,application/json"></label>
   </header>
-  <div class="banner" id="banner" hidden>Illustrative sample. These numbers and labels are made up to show the layout, not real model output. Run <span class="mono">watch.py --html</span> or the notebook to replay a real trace.</div>
+  <div class="banner" id="banner" hidden>Illustrative sample: made-up numbers and labels to show the layout. Run <span class="mono">watch.py --html</span> or the notebook to replay a real trace.</div>
   <div class="err" id="err" role="alert" hidden></div>
 
-  <section class="card" aria-label="Generated text">
-    <div class="text" id="text"></div>
-  </section>
-
-  <div class="transport">
-    <div class="btns">
-      <button class="tb" id="first" type="button" aria-label="First token">⏮</button>
-      <button class="tb" id="prev" type="button" aria-label="Previous token">◀</button>
-      <button class="tb play" id="play" type="button">Play</button>
-      <button class="tb" id="next" type="button" aria-label="Next token">▶</button>
-    </div>
-    <input class="slider" id="slider" type="range" min="0" max="0" value="0" aria-label="Token position">
-    <span class="pos" id="pos"></span>
-    <select class="speed" id="speed" aria-label="Playback speed">
-      <option value="2000">Slow</option>
-      <option value="1100" selected>Normal</option>
-      <option value="500">Fast</option>
-    </select>
-  </div>
-  <div class="keys">Space plays or pauses. Arrow keys step. Click any word to jump to it.</div>
-
-  <div class="grid">
+  <main class="main">
     <div class="col">
-      <section class="card">
+      <section class="card textcard" aria-label="Conversation">
+        <div id="youbox" hidden><p class="who">You</p><p class="you" id="you"></p><p class="who">Model</p></div>
+        <div class="text" id="text"></div>
+        <div class="hl" id="hl" hidden></div>
+      </section>
+      <section class="card choicecard">
         <h2>The choice</h2>
         <p class="sub">The word picked, and what else it considered.</p>
         <div class="chosen"><span class="big" id="big"></span><span class="pct" id="pct"></span></div>
         <div class="rows" id="alts"></div>
       </section>
-      <section class="card">
-        <h2 id="conceptTitle">Active concepts</h2>
-        <p class="sub" id="conceptSub">Features that fired for this word, strongest first.</p>
-        <div id="concepts"></div>
-      </section>
     </div>
-    <section class="card">
+    <section class="card concepts-card">
+      <h2>Concepts at this word</h2>
+      <p class="sub">Strongest features per layer, early to late. Gray text is the free label: words a feature pushes toward. Click one to light up its words.</p>
+      <div id="concepts" class="scroll"></div>
+    </section>
+    <section class="card lens-card">
       <h2>How the guess formed</h2>
-      <p class="sub">Each bar is one layer, read as if the model stopped there. Height is the chance it gives the word it finally chose. Teal bars already had that word as their top guess.</p>
-      <div class="chartbox"><svg class="chart" id="chart" viewBox="0 0 560 200" role="img" aria-label="Chance of the chosen word at each layer"></svg></div>
-      <p class="summary" id="summary"></p>
-      <div class="tablewrap">
-        <table>
-          <thead><tr><th>Layer</th><th>Top guess</th><th>Its chance</th><th>Chosen word</th></tr></thead>
-          <tbody id="tbody"></tbody>
-        </table>
+      <p class="sub">Each bar is a layer read as if the model stopped there. Height is the chance of the final word. Teal bars already had it as their top guess.</p>
+      <div class="scroll">
+        <svg class="chart" id="chart" viewBox="0 0 560 180" role="img" aria-label="Chance of the chosen word at each layer"></svg>
+        <p class="summary" id="summary"></p>
+        <details>
+          <summary>Layer-by-layer table</summary>
+          <div class="tablewrap">
+            <table>
+              <thead><tr><th>Layer</th><th>Top guess</th><th>Its chance</th><th>Chosen word</th></tr></thead>
+              <tbody id="tbody"></tbody>
+            </table>
+          </div>
+        </details>
       </div>
     </section>
-  </div>
+  </main>
+
+  <section class="card timeline" aria-label="Concept timeline">
+    <div class="tlhead">
+      <h2>Concept timeline</h2>
+      <div class="pills" id="layerpills" role="group" aria-label="Layer"></div>
+      <p class="sub" id="tlsub"></p>
+      <input class="find" id="find" type="search" placeholder="Find a concept" aria-label="Find a concept" autocomplete="off">
+    </div>
+    <div class="tl" id="tl">
+      <div class="tllabels" id="tllabels"></div>
+      <div class="tlscroll" id="tlscroll"><canvas id="tlcanvas" aria-label="Concept activity across the reply"></canvas></div>
+    </div>
+    <div class="tlinfo" id="tlinfo"></div>
+  </section>
 </div>
 
 <script>
 const EMBEDDED = /*__TRACE_JSON__*/null;
 
+/* ---------- illustrative sample (made-up numbers, clearly labeled) ---------- */
 function sampleTrace(){
-  const L = 26;
-  const defs = [
-    {t:" Paris", p:.71, alts:[[" Paris",.71],[" a",.06],[" the",.05],[" located",.02],[" known",.01]], s:17, early:[" the"," a"," located"," French"," capital"],
-     f:[["capital cities and their countries",14.2],["France and French places",11.8],["completing a factual statement",8.9],["European geography",7.1],["names of cities",5.4]]},
-    {t:".", p:.48, alts:[[".",.48],[",",.31],[" and",.06],["\n",.04],[" (",.02]], s:21, early:[","," and"," the",","],
-     f:[["end of a sentence",12.6],["Paris (the city)",9.3],["short factual answers",6.8],["punctuation after a noun",5.0]]},
-    {t:" It", p:.22, alts:[[" It",.22],[" The",.19],["\n",.12],[" Paris",.09],[" This",.05]], s:23, early:[" The","\n"," The"," Paris"],
-     f:[["start of a new sentence",11.1],["referring back to a place",8.7],["encyclopedia-style prose",6.2],["France and French places",4.4]]},
-    {t:" is", p:.57, alts:[[" is",.57],[" was",.11],[" has",.09],["'s",.06],[" became",.03]], s:15, early:[" was"," has"," the"],
-     f:[["verb after a subject",10.4],["describing a city",8.1],["present tense facts",6.6],["Paris (the city)",5.2]]},
-    {t:" also", p:.34, alts:[[" also",.34],[" the",.27],[" known",.12],[" a",.08],[" one",.04]], s:22, early:[" the"," a"," the"," known"],
-     f:[["adding another fact",9.7],["describing a city",7.9],["superlatives and rankings",5.5],["tourism and landmarks",4.1]]}
-  ];
-  const steps = defs.map((d, i) => {
+  const L = 34, layers = [9, 17, 22, 29];
+  const words = [" Partly","."," Modern"," models"," learn"," billions"," of"," numbers"," during"," training",","," so"," nobody"," wrote"," their"," rules"," and"," we"," can","'t"," read"," their"," reasoning"," directly","."," But"," interpretability"," research"," is"," starting"," to"," map"," the"," concepts"," inside"," them",","," and"," that"," map"," keeps"," getting"," clearer","."];
+  const C = {
+    9:  [["start of an answer",[0,2],9],["hedging and partial answers",[0,1],7],["plural nouns",[3,3],6,[7,7],5],["numbers and amounts",[5,7],11],["negation",[18,19],10],["comma and clause breaks",[10,10],8,[36,36],8],["technical vocabulary",[26,27],9],["pronouns for a group",[14,14],6,[17,17],6,[21,21],6]],
+    17: [["AI and machine learning",[2,9],12,[26,27],9],["uncertainty about an answer",[0,1],10,[17,23],6],["explaining a cause",[10,15],9],["things that cannot be seen or read",[17,23],13],["scientific research",[25,30],11],["contrast: but, however",[25,25],14],["the inside of a system",[31,35],12],["getting better over time",[39,42],10]],
+    22: [["transparency and understanding",[18,23],12,[31,35],10],["scale: billions, huge",[5,7],13],["AI and machine learning",[2,4],8,[26,28],8],["mapping and discovery",[31,33],11,[39,39],9],["progress toward a goal",[29,30],8,[40,42],11],["learning from data",[4,9],9]],
+    29: [["wrapping up a point",[39,43],12],["predicting the next clause",[11,16],7,[36,38],7],["answer framing",[0,1],10],["optimistic tone",[40,42],9],["formal explanation register",[2,35],4]]
+  };
+  const PROMOTES = {9:[" the"," a"," of"," and"],22:[" understand"," transparent"," map"],29:[" clearer"," better"," overall"]};
+  const info = {};
+  const feats = words.map(() => ({}));
+  layers.forEach((layer, li) => {
+    C[layer].forEach((c, ci) => {
+      const idx = 1000 * (li + 1) + ci * 37;
+      const key = `${layer}:${idx}`;
+      info[key] = {layer, index:idx, label: layer === 17 ? c[0] : null,
+        promotes: layer === 17 ? [] : c[0].split(/[ :,]+/).filter(w => w.length > 3).slice(0, 4), url:null};
+      for (let k = 1; k < c.length; k += 2) {
+        const [a, b] = c[k], peak = c[k + 1];
+        for (let i = a; i <= b && i < words.length; i++) {
+          const mid = (a + b) / 2, span = Math.max(1, (b - a) / 2 + 0.5);
+          const v = peak * (1 - 0.45 * Math.abs(i - mid) / span) * (0.85 + 0.15 * ((i * 7 + ci) % 5) / 4);
+          (feats[i][layer] ||= []).push({index:idx, activation:+v.toFixed(2)});
+        }
+      }
+    });
+  });
+  const steps = words.map((w, i) => {
+    const p = [0.41,0.62,0.33,0.71,0.38,0.29,0.93,0.55,0.21,0.66,0.47,0.36,0.18,0.52,0.44,0.61,0.27,0.49,0.58,0.88,0.43,0.37,0.31,0.45,0.79,0.24,0.19,0.57,0.63,0.35,0.81,0.28,0.68,0.42,0.53,0.6,0.5,0.34,0.26,0.39,0.22,0.48,0.51,0.83][i] || 0.4;
+    const s = 12 + ((i * 11) % 19);
     const lens = [];
     for (let l = 0; l < L; l++) {
-      let c = l === L - 1 ? d.p : d.p / (1 + Math.exp(-(l - d.s + 1) * 0.8));
-      const before = l < d.s;
-      const top = before ? d.early[Math.min(d.early.length - 1, Math.floor(l * d.early.length / d.s))] : d.t;
-      const tp = before ? Math.min(0.9, c + 0.04 + 0.12 * ((l * 7) % 5) / 5) : c;
-      lens.push({layer:l, top_token:top, top_prob:+tp.toFixed(4), chosen_prob:+c.toFixed(4)});
+      const c = l === L - 1 ? p : p / (1 + Math.exp(-(l - s + 1) * 0.7));
+      const before = l < s;
+      const early = [" the"," a",","," and"," of"];
+      lens.push({layer:l, top_token: before ? early[(l + i) % early.length] : w,
+        top_prob: +(before ? Math.min(.9, c + .05 + .1 * ((l * 3 + i) % 4) / 4) : c).toFixed(4), chosen_prob:+c.toFixed(4)});
     }
-    return {index:i, token:d.t, prob:d.p, alternatives:d.alts.map(a => ({token:a[0], prob:a[1]})), lens, settled_layer:d.s,
-      active_count:40 + i * 7, features:d.f.map((f, k) => ({index:1000 + i * 10 + k, activation:f[1], label:f[0], url:null}))};
+    const features = {}, active = {};
+    layers.forEach(layer => {
+      const rows = (feats[i][layer] || []).sort((x, y) => y.activation - x.activation);
+      features[layer] = rows; active[layer] = rows.length + 20 + ((i * 3) % 15);
+    });
+    return {index:i, token:w, prob:p,
+      alternatives:[{token:w, prob:p}, {token:" the", prob:+(p * .25).toFixed(3)}, {token:" a", prob:+(p * .12).toFixed(3)}, {token:",", prob:+(p * .06).toFixed(3)}],
+      lens, settled_layer:s, features, active_count:active, stop:false};
   });
-  return {version:1, meta:{model:"google/gemma-2-2b", sae:"Gemma Scope, layer 20 (example)", sae_layer:20, n_layers:L, sample:true},
-    prompt:"The capital of France is", prompt_tokens:["<bos>","The"," capital"," of"," France"," is"], steps};
+  steps.push({index:words.length, token:"<end_of_turn>", prob:.97, alternatives:[{token:"<end_of_turn>", prob:.97}],
+    lens:Array.from({length:L}, (_, l) => ({layer:l, top_token: l > 20 ? "<end_of_turn>" : "\n", top_prob:.5, chosen_prob: l > 20 ? .97 * (l - 20) / 13 : .01})),
+    settled_layer:21, features:{}, active_count:{}, stop:true});
+  return {version:2, meta:{model:"google/gemma-3-4b-it", sae:"Gemma Scope 2 (example)", sae_layers:layers, labeled_layers:[17], n_layers:L, chat:true, sample:true},
+    prompt:"Is AI a black box?", messages:[{role:"user", content:"Is AI a black box?"}], prompt_tokens:[], steps, feature_info:info};
 }
 
+/* ---------- helpers ---------- */
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const vis = s => (String(s).replace(/\n/g, "↵").replace(/ /g, "␣")) || "∅";
 const pct = p => p > 0 && p < 0.001 ? "<0.1%" : (p * 100 >= 10 || p === 0 ? (p * 100).toFixed(0) : (p * 100).toFixed(1)) + "%";
+const describe = inf => !inf ? "" : (inf.label || (inf.promotes && inf.promotes.length ? "pushes toward: " + inf.promotes.join(", ") : ""));
+const isLabeled = inf => !!(inf && inf.label);
 
-let trace = null, cur = 0, timer = null;
+let trace = null, cur = 0, timer = null, layerSel = null, concept = null, query = "";
+let idx = null; // per-trace index: acts[key] -> Float32Array, rowsByLayer[layer] -> [{key,total,max}]
+const ROW = 18, AXIS = 16;
+let cellW = 10;
 
-function validTrace(t){
-  return t && Array.isArray(t.steps) && t.steps.length > 0 && Array.isArray(t.steps[0].lens);
+/* ---------- load and normalize ---------- */
+function validTrace(t){ return t && Array.isArray(t.steps) && t.steps.length > 0 && Array.isArray(t.steps[0].lens); }
+
+function normalize(t){
+  t.meta = t.meta || {};
+  t.feature_info = t.feature_info || {};
+  if (Array.isArray(t.steps[0].features) || typeof t.steps[0].active_count === "number") { // version 1
+    const layer = String(t.meta.sae_layer ?? 0);
+    t.steps.forEach(s => {
+      const rows = Array.isArray(s.features) ? s.features : [];
+      rows.forEach(f => {
+        const key = `${layer}:${f.index}`;
+        t.feature_info[key] ||= {layer:+layer, index:f.index, label:f.label || null, promotes:[], url:f.url || null};
+      });
+      s.features = {[layer]: rows.map(f => ({index:f.index, activation:f.activation}))};
+      s.active_count = {[layer]: typeof s.active_count === "number" ? s.active_count : rows.length};
+    });
+    t.meta.sae_layers = [+layer];
+  }
+  if (!t.meta.sae_layers) t.meta.sae_layers = [...new Set(t.steps.flatMap(s => Object.keys(s.features || {})))].map(Number).sort((a, b) => a - b);
+  return t;
+}
+
+function buildIndex(t){
+  const n = t.steps.length, acts = {}, totals = {};
+  t.steps.forEach((s, i) => {
+    for (const [layer, rows] of Object.entries(s.features || {})) {
+      for (const f of rows) {
+        const key = `${layer}:${f.index}`;
+        (acts[key] ||= new Float32Array(n))[i] = f.activation;
+        totals[key] = (totals[key] || 0) + f.activation;
+      }
+    }
+  });
+  const rowsByLayer = {};
+  for (const key of Object.keys(acts)) {
+    const layer = key.split(":")[0];
+    let max = 0; for (const v of acts[key]) if (v > max) max = v;
+    (rowsByLayer[layer] ||= []).push({key, total:totals[key], max});
+  }
+  for (const l of Object.keys(rowsByLayer)) rowsByLayer[l].sort((a, b) => b.total - a.total);
+  return {acts, rowsByLayer};
 }
 
 function load(t){
-  trace = t;
-  cur = 0;
   stop();
-  $("banner").hidden = !(t.meta && t.meta.sample);
+  trace = normalize(t);
+  idx = buildIndex(trace);
+  cur = 0; concept = null; query = ""; $("find").value = "";
+  const layers = trace.meta.sae_layers || [];
+  const labeled = trace.meta.labeled_layers || [];
+  layerSel = String(labeled.find(l => layers.includes(l)) ?? layers[Math.floor(layers.length / 2)] ?? "");
+  $("banner").hidden = !trace.meta.sample;
   $("err").hidden = true;
-  const m = t.meta || {};
-  const bits = [];
+  const m = trace.meta, bits = [];
   if (m.model) bits.push(m.model);
   if (m.sae) bits.push(m.sae);
   if (m.device) bits.push(`${m.device}${m.dtype ? " · " + m.dtype : ""}`);
-  if (t.created) bits.push(t.created.replace("T", " "));
+  if (trace.created) bits.push(trace.created.replace("T", " "));
   $("meta").innerHTML = bits.map(b => `<span>${esc(b)}</span>`).join("");
-  $("slider").max = String(t.steps.length - 1);
-  const layer = m.sae_layer ?? "?";
-  $("conceptTitle").textContent = `Active concepts at layer ${layer}`;
+  $("slider").max = String(trace.steps.length - 1);
+  renderPills();
   render();
 }
 
+/* ---------- conversation text ---------- */
 function renderText(){
+  const chat = !!trace.meta.chat;
+  $("youbox").hidden = !chat;
+  if (chat) {
+    const earlier = (trace.messages || []).length - 1;
+    $("you").textContent = (trace.prompt || "") + (earlier > 0 ? `\n\n(continuing a conversation of ${earlier + 1} messages)` : "");
+  }
   const box = $("text");
   box.textContent = "";
-  for (const tok of (trace.prompt_tokens || [trace.prompt || ""])) {
-    if (tok === "<bos>" || tok === "<s>") continue;
-    const s = document.createElement("span");
-    s.className = "p";
-    s.textContent = tok;
-    box.appendChild(s);
+  if (!chat) {
+    for (const tok of (trace.prompt_tokens && trace.prompt_tokens.length ? trace.prompt_tokens : [trace.prompt || ""])) {
+      if (/^<[^>]+>$/.test(tok)) continue;
+      const s = document.createElement("span"); s.className = "p"; s.textContent = tok; box.appendChild(s);
+    }
   }
+  const acts = concept ? idx.acts[concept] : null;
+  const max = concept ? Math.max(1e-9, ...acts) : 1;
   trace.steps.forEach((st, i) => {
-    if (i > cur) return;
+    if (st.stop) return;
     const b = document.createElement("button");
     b.type = "button";
-    b.className = "tk" + (i === cur ? " cur" : "");
+    b.className = "tk" + (i === cur ? " cur" : i > cur ? " future" : "");
     b.textContent = st.token;
+    b.dataset.i = i;
+    if (acts && acts[i] > 0 && i !== cur) b.style.background = `rgba(var(--warm-rgb), ${(0.12 + 0.5 * acts[i] / max).toFixed(2)})`;
     b.setAttribute("aria-label", `Word ${i + 1}: ${vis(st.token)}`);
-    b.addEventListener("click", () => { stop(); go(i); });
     box.appendChild(b);
   });
-  if (cur === trace.steps.length - 1) return;
-  const c = document.createElement("span");
-  c.className = "caret";
-  c.setAttribute("aria-hidden", "true");
-  box.appendChild(c);
+  const curEl = box.querySelector(".tk.cur");
+  if (curEl) { const r = curEl.getBoundingClientRect(), b = box.getBoundingClientRect(); if (r.top < b.top || r.bottom > b.bottom) box.scrollTop += r.top - b.top - b.height / 3; }
+  const hl = $("hl");
+  if (concept) {
+    const inf = trace.feature_info[concept];
+    const count = acts.reduce((n, v) => n + (v > 0), 0);
+    hl.hidden = false;
+    hl.innerHTML = `<span class="chip"><span>Layer ${esc(concept.split(":")[0])} · ${esc(describe(inf) || "#" + concept.split(":")[1])}</span><button type="button" aria-label="Clear highlight" id="clearhl">✕</button></span><span class="pos">active on ${count} of ${trace.steps.length} words</span>`;
+    $("clearhl").addEventListener("click", () => select(null));
+  } else hl.hidden = true;
+}
+$("text").addEventListener("click", e => { const b = e.target.closest(".tk"); if (b) { stop(); go(+b.dataset.i); } });
+
+/* ---------- concept timeline ---------- */
+function renderPills(){
+  const layers = trace.meta.sae_layers || [];
+  const labeled = new Set((trace.meta.labeled_layers || []).map(String));
+  $("layerpills").innerHTML = layers.map(l => `<button class="pill" type="button" data-l="${l}" aria-pressed="${String(l) === layerSel}">Layer ${l}${labeled.has(String(l)) ? " <small>· labeled</small>" : ""}</button>`).join("");
+  const n = trace.meta.n_layers;
+  $("tlsub").textContent = `Strongest concepts across the whole reply. Columns are words; darker is more active.${n ? " Model has " + n + " layers." : ""}`;
+}
+$("layerpills").addEventListener("click", e => {
+  const b = e.target.closest(".pill"); if (!b) return;
+  layerSel = b.dataset.l;
+  [...$("layerpills").children].forEach(x => x.setAttribute("aria-pressed", String(x.dataset.l === layerSel)));
+  renderTimeline();
+});
+
+function visibleRows(){
+  let rows = (idx.rowsByLayer[layerSel] || []);
+  if (query) {
+    const q = query.toLowerCase();
+    rows = rows.filter(r => {
+      const inf = trace.feature_info[r.key] || {};
+      return describe(inf).toLowerCase().includes(q) || r.key.split(":")[1] === q.replace("#", "");
+    });
+  }
+  return rows.slice(0, query ? 60 : 24);
 }
 
+function cssVar(name){ return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
+
+function renderTimeline(){
+  const rows = visibleRows();
+  const labels = $("tllabels");
+  if (!rows.length) {
+    labels.innerHTML = "";
+    $("tlcanvas").width = 0; $("tlcanvas").height = 0;
+    $("tlinfo").textContent = query ? `No concepts at layer ${layerSel} match "${query}".` : "No concept data at this layer.";
+    return;
+  }
+  labels.innerHTML = `<div class="spacer"></div>` + rows.map(r => {
+    const inf = trace.feature_info[r.key] || {};
+    const d = describe(inf) || "#" + r.key.split(":")[1];
+    return `<button type="button" class="rowlab${r.key === concept ? " sel" : ""}" data-k="${esc(r.key)}" title="${esc(d)} (#${esc(r.key.split(":")[1])})"><span class="${isLabeled(inf) ? "" : "pt"}">${esc(d)}</span></button>`;
+  }).join("");
+  drawTimeline(rows);
+  if (!$("tlinfo").dataset.hover) $("tlinfo").textContent = `Showing ${rows.length} of ${(idx.rowsByLayer[layerSel] || []).length} concepts seen at layer ${layerSel}.`;
+}
+$("tllabels").addEventListener("click", e => { const b = e.target.closest(".rowlab"); if (b) select(b.dataset.k === concept ? null : b.dataset.k); });
+
+function drawTimeline(rows){
+  rows = rows || visibleRows();
+  const n = trace.steps.length, box = $("tlscroll"), cv = $("tlcanvas");
+  const avail = Math.max(120, box.clientWidth - 2);
+  cellW = Math.max(6, Math.min(18, Math.floor(avail / n)));
+  const W = cellW * n, H = AXIS + rows.length * ROW, dpr = window.devicePixelRatio || 1;
+  cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr);
+  cv.style.width = W + "px"; cv.style.height = H + "px";
+  const ctx = cv.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, W, H);
+  const warm = cssVar("--warm-rgb"), track = cssVar("--track"), muted = cssVar("--muted"), accent = cssVar("--accent");
+  ctx.font = `10px ${cssVar("--font-mono") || "monospace"}`;
+  ctx.fillStyle = muted; ctx.textBaseline = "top";
+  const every = cellW >= 14 ? 5 : cellW >= 9 ? 10 : 20;
+  for (let i = 0; i < n; i += every) ctx.fillText(String(i + 1), i * cellW + 1, 3);
+  rows.forEach((r, ri) => {
+    const y = AXIS + ri * ROW;
+    if (r.key === concept) { ctx.fillStyle = `rgba(${warm}, 0.10)`; ctx.fillRect(0, y, W, ROW); }
+    ctx.fillStyle = track; ctx.fillRect(0, y + ROW / 2 - 1, W, 2);
+    const a = idx.acts[r.key];
+    for (let i = 0; i < n; i++) {
+      if (!(a[i] > 0)) continue;
+      ctx.fillStyle = `rgba(${warm}, ${(0.18 + 0.82 * a[i] / r.max).toFixed(3)})`;
+      ctx.fillRect(i * cellW + 0.5, y + 3, Math.max(1, cellW - 1), ROW - 6);
+    }
+  });
+  ctx.strokeStyle = accent; ctx.lineWidth = 1.5;
+  ctx.strokeRect(cur * cellW + 0.75, 1, cellW - 1.5, H - 2);
+  if (timer) {
+    const x = cur * cellW;
+    if (x < box.scrollLeft || x > box.scrollLeft + box.clientWidth - cellW) box.scrollLeft = Math.max(0, x - box.clientWidth / 3);
+  }
+}
+
+function cellAt(e){
+  const r = $("tlcanvas").getBoundingClientRect();
+  const i = Math.floor((e.clientX - r.left) / cellW), ri = Math.floor((e.clientY - r.top - AXIS) / ROW);
+  return {i, ri};
+}
+$("tlcanvas").addEventListener("mousemove", e => {
+  const {i, ri} = cellAt(e), rows = visibleRows();
+  if (i < 0 || i >= trace.steps.length || ri < 0 || ri >= rows.length) { delete $("tlinfo").dataset.hover; return; }
+  const key = rows[ri].key, v = idx.acts[key][i], inf = trace.feature_info[key];
+  $("tlinfo").dataset.hover = "1";
+  $("tlinfo").textContent = `Word ${i + 1} ${vis(trace.steps[i].token)} · ${describe(inf) || "#" + key.split(":")[1]} · ${v > 0 ? "activation " + v.toFixed(1) : "not in the top concepts here"}`;
+});
+$("tlcanvas").addEventListener("mouseleave", () => { delete $("tlinfo").dataset.hover; renderTimeline(); });
+$("tlcanvas").addEventListener("click", e => {
+  const {i, ri} = cellAt(e), rows = visibleRows();
+  stop();
+  if (ri >= 0 && ri < rows.length) select(rows[ri].key, true);
+  if (i >= 0 && i < trace.steps.length) go(i);
+});
+$("find").addEventListener("input", e => { query = e.target.value.trim(); renderTimeline(); });
+
+/* ---------- per-word panels ---------- */
 function renderChoice(st){
   $("big").textContent = vis(st.token);
   $("pct").innerHTML = `${pct(st.prob)} <small>chance</small>`;
@@ -265,24 +539,29 @@ function renderChoice(st){
 }
 
 function renderConcepts(st){
-  const box = $("concepts");
-  const feats = st.features || [];
-  $("conceptSub").textContent = feats.length
-    ? `${st.active_count ?? feats.length} features fired for this word. Strongest ${feats.length} shown.`
-    : "No feature data in this trace.";
-  if (!feats.length) { box.innerHTML = `<p class="empty">Run with the SAE loaded to see concepts.</p>`; return; }
-  const max = Math.max(...feats.map(f => f.activation), 1e-9);
-  box.innerHTML = feats.map(f => {
-    const id = f.url ? `<a href="${esc(f.url)}" target="_blank" rel="noopener">#${esc(f.index)}</a>` : `<span class="idx">#${esc(f.index)}</span>`;
-    const lab = f.label ? esc(f.label) : `<span class="nolab">no label yet</span>`;
-    return `<div class="concept">${id}<span class="track"><span class="fill w" style="width:${(100 * f.activation / max).toFixed(0)}%"></span></span><span>${lab}</span></div>`;
+  const layers = trace.meta.sae_layers || [];
+  const html = layers.map(layer => {
+    const rows = ((st.features || {})[layer] || []).slice(0, 4);
+    const count = (st.active_count || {})[layer];
+    if (!rows.length) return `<div class="layerblock"><h3>Layer ${layer}</h3><p class="empty">No concepts recorded for this word.</p></div>`;
+    const max = Math.max(...rows.map(f => f.activation), 1e-9);
+    return `<div class="layerblock"><h3>Layer ${layer} <small>${count != null ? "· " + count + " firing" : ""}</small></h3>` + rows.map(f => {
+      const key = `${layer}:${f.index}`, inf = trace.feature_info[key] || {};
+      const d = describe(inf) || "no label";
+      return `<button type="button" class="concept${key === concept ? " sel" : ""}" data-k="${esc(key)}" title="${esc(d)}">`+
+        `<span class="idx">#${esc(f.index)}</span><span class="track"><span class="fill w" style="width:${(100 * f.activation / max).toFixed(0)}%"></span></span>`+
+        `<span class="desc${isLabeled(inf) ? "" : " pt"}">${esc(d)}</span></button>`;
+    }).join("") + `</div>`;
   }).join("");
+  const sel = concept && trace.feature_info[concept];
+  const link = sel && sel.url ? `<div class="links">Selected concept on Neuronpedia: <a href="${esc(sel.url)}" target="_blank" rel="noopener">#${esc(sel.index)}</a></div>` : "";
+  $("concepts").innerHTML = (html || `<p class="empty">No concept data in this trace.</p>`) + link;
 }
+$("concepts").addEventListener("click", e => { const b = e.target.closest(".concept"); if (b) select(b.dataset.k === concept ? null : b.dataset.k, true); });
 
 function renderLens(st){
-  // Draw at the box's real pixel width so labels stay readable on phones.
   const W = Math.max(280, Math.round($("chart").parentElement.clientWidth || 560));
-  const H = W < 440 ? 180 : 200, pl = 36, pr = 10, pt = 22, pb = 26;
+  const H = W < 440 ? 160 : 170, pl = 36, pr = 10, pt = 22, pb = 26;
   $("chart").setAttribute("viewBox", `0 0 ${W} ${H}`);
   const n = st.lens.length, cw = (W - pl - pr) / n, ih = H - pt - pb;
   const y = v => pt + ih * (1 - v);
@@ -291,31 +570,34 @@ function renderLens(st){
     g += `<line class="grid" x1="${pl}" x2="${W - pr}" y1="${y(v)}" y2="${y(v)}"/>`;
     g += `<text x="${pl - 6}" y="${y(v) + 3}" text-anchor="end">${v * 100}%</text>`;
   }
+  const tick = n > 30 ? 10 : 5;
   st.lens.forEach((r, i) => {
     const hit = r.top_token === st.token;
     const h = Math.max(ih * r.chosen_prob, r.chosen_prob > 0 ? 1 : 0);
     const x = pl + i * cw + cw * 0.15;
     g += `<rect class="bar${hit ? " hit" : ""}" x="${x.toFixed(1)}" y="${(y(0) - h).toFixed(1)}" width="${(cw * 0.7).toFixed(1)}" height="${h.toFixed(1)}" rx="1.5">`+
          `<title>Layer ${r.layer}: top guess ${esc(vis(r.top_token))} (${pct(r.top_prob)}); ${esc(vis(st.token))} at ${pct(r.chosen_prob)}</title></rect>`;
-    if (i % 5 === 0 || (i === n - 1 && i % 5 > 1)) g += `<text x="${(pl + i * cw + cw / 2).toFixed(1)}" y="${H - 8}" text-anchor="middle">${r.layer}</text>`;
+    if (i % tick === 0 || (i === n - 1 && i % tick > 2)) g += `<text x="${(pl + i * cw + cw / 2).toFixed(1)}" y="${H - 8}" text-anchor="middle">${r.layer}</text>`;
   });
   const s = st.settled_layer;
   if (s !== null && s !== undefined) {
-    const x = pl + s * cw;
-    const right = x > W - 120;
+    const x = pl + s * cw, right = x > W - 120;
     g += `<line class="mark" x1="${x.toFixed(1)}" x2="${x.toFixed(1)}" y1="${pt - 8}" y2="${y(0)}"/>`;
     g += `<text class="marklab" x="${(right ? x - 5 : x + 5).toFixed(1)}" y="${pt - 10}" text-anchor="${right ? "end" : "start"}">settled at layer ${s}</text>`;
   }
+  for (const layer of (trace.meta.sae_layers || [])) {
+    if (layer >= n) continue;
+    const x = pl + layer * cw + cw / 2;
+    g += `<circle cx="${x.toFixed(1)}" cy="${(y(0) + 5).toFixed(1)}" r="2.2" fill="var(--warm)"><title>Concepts are read at layer ${layer}</title></circle>`;
+  }
   $("chart").innerHTML = g;
-
-  const last = n - 1;
-  const firstSeen = st.lens.findIndex(r => r.top_token === st.token);
+  const last = n - 1, firstSeen = st.lens.findIndex(r => r.top_token === st.token);
   $("summary").innerHTML = (s === null || s === undefined)
     ? `The final layer's choice was ${esc(vis(st.token))}.`
-    : `The model locked onto <b>${esc(vis(st.token))}</b> at layer ${s} of ${last} and never changed its mind after that.` +
-      (firstSeen >= 0 && firstSeen < s ? ` It first appeared as the top guess at layer ${firstSeen}, then lost the lead before coming back.` : "") +
-      (s === last ? " That is a late decision: it was still undecided until the last layer." : "");
-
+    : `It locked onto <b>${esc(vis(st.token))}</b> at layer ${s} of ${last} and kept it from there.` +
+      (firstSeen >= 0 && firstSeen < s ? ` It first led at layer ${firstSeen}, lost the lead, then came back.` : "") +
+      (s === last ? " A late decision: it was undecided until the last layer." : "") +
+      ` <span style="color:var(--muted)">Copper dots mark the layers where concepts are read.</span>`;
   $("tbody").innerHTML = st.lens.map(r => {
     const hit = r.top_token === st.token;
     return `<tr class="${hit ? "hit" : ""}${r.layer === s ? " set" : ""}"><td class="n">${r.layer}</td><td class="g">${esc(vis(r.top_token))}</td>`+
@@ -323,26 +605,32 @@ function renderLens(st){
   }).join("");
 }
 
+/* ---------- state ---------- */
 function render(){
   const st = trace.steps[cur];
   $("slider").value = String(cur);
   $("pos").textContent = `Word ${cur + 1} of ${trace.steps.length}`;
   renderText();
+  renderTimeline();
   renderChoice(st);
   renderConcepts(st);
   renderLens(st);
 }
-
+function select(key, moveLayer){
+  concept = key;
+  if (key && moveLayer) {
+    const l = key.split(":")[0];
+    if (l !== layerSel) { layerSel = l; [...$("layerpills").children].forEach(x => x.setAttribute("aria-pressed", String(x.dataset.l === layerSel))); }
+  }
+  render();
+}
 function go(i){ cur = Math.max(0, Math.min(trace.steps.length - 1, i)); render(); }
 function stop(){ if (timer) { clearInterval(timer); timer = null; } $("play").textContent = "Play"; }
 function play(){
   if (timer) return stop();
   if (cur >= trace.steps.length - 1) go(0);
   $("play").textContent = "Pause";
-  timer = setInterval(() => {
-    if (cur >= trace.steps.length - 1) return stop();
-    go(cur + 1);
-  }, +$("speed").value);
+  timer = setInterval(() => { if (cur >= trace.steps.length - 1) return stop(); go(cur + 1); }, +$("speed").value);
 }
 
 $("play").addEventListener("click", play);
@@ -356,6 +644,7 @@ document.addEventListener("keydown", e => {
   if (e.key === " ") { e.preventDefault(); play(); }
   else if (e.key === "ArrowRight") { stop(); go(cur + 1); }
   else if (e.key === "ArrowLeft") { stop(); go(cur - 1); }
+  else if (e.key === "Escape" && concept) select(null);
 });
 
 function readFile(file){
@@ -376,8 +665,9 @@ $("file").addEventListener("change", e => { if (e.target.files[0]) readFile(e.ta
 let resizeTimer = null;
 window.addEventListener("resize", () => {
   clearTimeout(resizeTimer);
-  resizeTimer = setTimeout(() => { if (trace) renderLens(trace.steps[cur]); }, 120);
+  resizeTimer = setTimeout(() => { if (trace) { renderTimeline(); renderLens(trace.steps[cur]); } }, 120);
 });
+if (window.matchMedia) window.matchMedia("(prefers-color-scheme: dark)").addEventListener?.("change", () => trace && renderTimeline());
 document.addEventListener("dragover", e => e.preventDefault());
 document.addEventListener("drop", e => { e.preventDefault(); if (e.dataTransfer.files[0]) readFile(e.dataTransfer.files[0]); });
 
