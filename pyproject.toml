@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "model-watch"
+version = "0.1.0"
+description = "Watch a language model choose each word: per-layer guesses and active SAE features."
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = ["torch>=2.2", "transformers>=4.44", "huggingface_hub>=0.23", "numpy>=1.24"]
+
+[tool.setuptools]
+packages = ["model_watch"]
+
+[tool.setuptools.package-data]
+model_watch = ["viewer.html"]

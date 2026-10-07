@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+.venv/
+*.egg-info/
+trace.json
+trace.html
+run.json
+run.html
+.ipynb_checkpoints/
