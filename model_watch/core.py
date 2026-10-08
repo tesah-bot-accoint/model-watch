@@ -456,16 +456,9 @@ class ModelWatcher:
             ids = torch.cat([ids, new], dim=1)
             feed = new if (use_cache and past is not None) else ids
 
-    def trace(self, prompt: Union[str, Messages], max_new_tokens: int = 200, stop_at_eos: bool = True,
-              on_step=None, use_cache: bool = True) -> dict:
-        """Run watch() to completion and return a JSON-ready trace for the viewer."""
+    def trace_header(self, prompt: Union[str, Messages]) -> dict:
+        """Everything in a trace except the steps: known before the first word is written."""
         prompt_ids = self.encode(prompt)[0].tolist()
-        steps = []
-        for record in self.watch(prompt, max_new_tokens, stop_at_eos, use_cache):
-            steps.append(record)
-            if on_step:
-                on_step(record, steps)
-        used = {feature_key(int(layer), f["index"]) for s in steps for layer, rows in s["features"].items() for f in rows}
         if isinstance(prompt, str):
             display, messages = prompt, ([{"role": "user", "content": prompt}] if self.chat else None)
         else:
@@ -479,6 +472,26 @@ class ModelWatcher:
             "prompt": display,
             "messages": messages,
             "prompt_tokens": [self._decode(i) for i in prompt_ids],
+        }
+
+    def trace(self, prompt: Union[str, Messages], max_new_tokens: int = 200, stop_at_eos: bool = True,
+              on_step=None, use_cache: bool = True, should_stop=None) -> dict:
+        """Run watch() to completion and return a JSON-ready trace for the viewer.
+
+        on_step(record, steps) runs after each word; should_stop() is checked after
+        each word and ends the reply early when it returns True.
+        """
+        header = self.trace_header(prompt)
+        steps = []
+        for record in self.watch(prompt, max_new_tokens, stop_at_eos, use_cache):
+            steps.append(record)
+            if on_step:
+                on_step(record, steps)
+            if should_stop and should_stop():
+                break
+        used = {feature_key(int(layer), f["index"]) for s in steps for layer, rows in s["features"].items() for f in rows}
+        return {
+            **header,
             "reply": self.reply_text(steps),
             "steps": steps,
             "feature_info": {k: self.feature_info[k] for k in sorted(used)},

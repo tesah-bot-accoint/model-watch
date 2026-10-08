@@ -8,7 +8,7 @@ For every word the model writes, Model Watch shows:
 2. **How the guess formed.** Every layer read as if the model stopped there (the "logit lens"), and the layer where the answer **settled**, meaning it became the top guess and never changed again.
 3. **Concepts at four depths.** Which features fired at four layers, from Google DeepMind's Gemma Scope 2 sparse autoencoders. Each feature gets a free offline label (the words it pushes the model toward), plus a Neuronpedia label where one exists.
 
-After each reply, a **one-screen replay viewer** (on a phone, its panels stack) shows the whole answer with a **concept timeline**: rows are concepts, columns are words. Click a concept and every word where it was active lights up in the text, so you can compare what the model says with what was active while it said it.
+After each reply, a **one-screen replay viewer** (on a phone, its panels stack) shows the whole answer with a **concept timeline**: rows are concepts, columns are words. Click a concept and every word where it was active lights up in the text, so you can compare what the model says with what was active while it said it. You can also chat inside that viewer and watch each reply fill it in live (see [Watch it live](#watch-it-live-in-the-full-viewer)).
 
 It only observes. Nothing inside the model is switched off or changed.
 
@@ -51,11 +51,21 @@ python watch.py --prompt "Is AI a black box?"                       # full live 
 python watch.py --prompt "Is AI a black box?" --compact             # choice + concepts only
 python watch.py --prompt "Why is the sky blue?" --quiet --html run.html   # just the text, then open run.html
 python watch.py --interactive --compact --html chat.html            # keep chatting; one replay per reply
+python watch.py --serve                                              # chat in the full viewer in your browser, live
 python watch.py --preset gemma-3-12b-it --device-map auto --prompt "..."  # split across GPUs
 python watch.py --preset qwen3-1.7b --prompt "Is 391 prime?" --compact     # a reasoning model: watch it think
 ```
 
 Useful flags: `--step` (Enter for each word), `--delay 0.5`, `--tokens 300` (default 200, or 1000 for reasoning models), `--no-thinking` (reasoning models answer directly), `--sae-layers 9,22`, `--json run.json` (save the trace for the viewer), `--no-labels` (offline), `--device cpu`. Run `python watch.py --help` for the full list.
+
+### Watch it live in the full viewer
+
+`python watch.py --serve` (or section 4b of the notebook in Colab) opens the one-screen viewer in live mode. Type a question under the conversation, and the text, the choice, the layer-by-layer guesses, the concepts and the timeline all fill in as each word is written.
+
+- **Look back while it writes.** Click an earlier word or concept and the view stays there while new words keep arriving. Go to the latest word to follow along again.
+- **Stop** ends a reply early. **New chat** starts over. When a reply is done, **Save this reply** downloads its replay page or trace.json.
+- **Everything stays on your machine.** The page is served by a small web server on your own computer or Colab session (`--port` picks the port, 8765 by default). Only that browser can reach it unless you change `--host`.
+- **Kaggle can't do this,** because it has no way to open a notebook's web server in a browser tab. There, use `ask()` in the notebook, which shows a smaller live panel.
 
 ### Presets
 
@@ -136,6 +146,7 @@ Everything has been tested on tiny, randomly built versions of Gemma 2, Gemma 3 
 
 - **Dictionary file format.** The names inside Google's dictionary files have been checked against SAELens, a widely used library that loads the same files, and match what the loader expects. They haven't been loaded from the real files here yet. If they ever differ, the error message lists them, and the fix is one line in `model_watch/sae.py`.
 - **12B on two GPUs.** Splitting the 12B model across two GPUs (Kaggle) is written but untested.
+- **Live viewer in Colab.** It has been tested in a browser on this computer with a tiny model, not yet through Colab's link to a notebook's web server.
 - **Qwen-Scope dictionaries.** Their file layout comes from SAELens's loader, not from opening the real files. They were trained on the plain Qwen3 1.7B, and how well they read the thinking version is untested.
 
 ### Closest stand-ins for the big closed models
@@ -157,7 +168,7 @@ Not all of it is. The replay viewer (`model_watch/viewer.html`, copied to `docs/
 
 So the work is split. Python runs the model on a GPU and records everything to a file, and the web page replays that file anywhere.
 
-**Could it all run in a browser?** Only partly, for now. Tools such as Transformers.js can run a small model like Gemma 3 1B in a browser, but the ready-made browser versions of the model only hand back the finished words, not each layer's numbers. The concept dictionaries are also large: each one for the 4B model is a few hundred megabytes, and Model Watch uses four, which is too much for most phones. A browser-only version with the 1B model and one dictionary is possible as an experiment, but it would be slow. The more practical next step is streaming a live Colab run into the web viewer, so you watch the reply form in the viewer while Python does the work on a free GPU.
+**Could it all run in a browser?** Only partly, for now. Tools such as Transformers.js can run a small model like Gemma 3 1B in a browser, but the ready-made browser versions of the model only hand back the finished words, not each layer's numbers. The concept dictionaries are also large: each one for the 4B model is a few hundred megabytes, and Model Watch uses four, which is too much for most phones. A browser-only version with the 1B model and one dictionary is possible as an experiment, but it would be slow. The practical middle ground is what Model Watch does now: Python does the work on a free GPU, and the web viewer shows the reply forming live (see [Watch it live](#watch-it-live-in-the-full-viewer)).
 
 ## Project layout
 
@@ -168,12 +179,14 @@ model_watch/
   labels.py    Neuronpedia label lookups with a disk cache
   render.py    Terminal and notebook live display of one word
   export.py    Save a trace as JSON or a self-contained replay page
+  live.py      Small web server for the live viewer (watch.py --serve, notebook section 4b)
   viewer.html  One-screen replay viewer (opened directly, shows a made-up sample with a "Start here" guide)
 watch.py       Terminal command
 notebooks/     Colab and Kaggle notebook
 docs/          The preview: index.html, an exact copy of viewer.html, served by GitHub Pages
 tests/
   test_model_watch.py  Runs everything on tiny random Gemma 2, Gemma 3 and Qwen3 models, no downloads
+  test_live.py         Runs the live server over real web requests with a tiny model
   test_preview.py      Checks docs/index.html still matches viewer.html (needs no PyTorch)
 requirements.txt, pyproject.toml   What to install
 ```

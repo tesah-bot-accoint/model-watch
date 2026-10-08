@@ -15,21 +15,23 @@ pip install -r requirements.txt            # or: pip install -e .
 python -m unittest discover -s tests -v    # offline; test_model_watch.py: tiny random Gemma 2, Gemma 3 text, Gemma 3 multimodal and Qwen3; test_preview.py: no torch needed
 python watch.py --prompt "Is AI a black box?"                   # needs HF_TOKEN + Gemma licenses accepted
 python watch.py --interactive --compact --html chat.html
+python watch.py --serve                                         # live viewer at http://localhost:8765/
 ```
 
 The notebook `notebooks/model_watch.ipynb` is generated plain nbformat JSON; edit carefully and keep every code cell parseable.
 
 ## Layout
 
-- `model_watch/core.py`: `PRESETS`, `WatchConfig` (preset defaults fill any `None` field; `.resolved()`), `ModelWatcher` (`load`, `encode`, `step`, `watch`, `trace`, `reply_text`, `add_labels`, `promotes`), `settled_layer`, `feature_key`.
+- `model_watch/core.py`: `PRESETS`, `WatchConfig` (preset defaults fill any `None` field; `.resolved()`), `ModelWatcher` (`load`, `encode`, `step`, `watch`, `trace_header`, `trace` (with `on_step` and `should_stop`), `reply_text`, `add_labels`, `promotes`), `settled_layer`, `feature_key`.
 - `model_watch/sae.py`: `JumpReLUSAE` (despite the name, also TopK: pass `threshold` for JumpReLU or `k` for TopK); `from_gemma_scope_1` (npz), `from_gemma_scope_2` (safetensors), `from_qwen_scope` (`.pt`, loaded with `weights_only=True`); `normalize_params` accepts key spellings like `w_enc`/`W_enc` and fixes transposed matrices using `b_dec`'s length.
 - `model_watch/labels.py`: `NeuronpediaLabels` (disk cache in `~/.cache/model-watch`, thread-safe, failures never cached, disables itself after 3 network failures).
 - `model_watch/render.py`: `format_step` (terminal), `step_html` (notebook live panel), `describe`.
 - `model_watch/export.py`: `save_json`, `export_html`, `trace_to_html` (injects JSON at `/*__TRACE_JSON__*/null`).
-- `model_watch/viewer.html`: one-screen replay viewer; opened directly it shows a made-up sample (`meta.sample: true`) with a dismissible "Start here" guide (Play, tap a word, tap a concept, Open trace.json). Reads trace versions 1 and 2. The one-screen layout applies at 1000x620 and up; narrower windows (phones) stack the panels and the page scrolls. On touch screens (`pointer: coarse`) transport buttons, speed menu and file picker grow to 44px, pills to 36px, concept rows and search to 40px, and timeline rows to 30px (`--row`); anything shown on hover must also work on tap (tapping a timeline cell selects that concept, jumps to that word and shows its activation). The concepts panel says "Active here does not prove it caused the word"; keep it.
+- `model_watch/live.py`: `LiveServer(watcher, ...).start(port)` (stdlib `ThreadingHTTPServer` in a daemon thread) and `LiveSession` (one conversation; the reply is written in a background thread, one at a time). The page is `viewer.html` with `/*__LIVE__*/null` replaced by `{"api": "api/"}`. Routes are relative so a proxy prefix works: `GET api/state?run=&since=&v=` long-polls (waits up to 15 s for `version > v`; sends steps from `since`, `header` only when `since == 0`, `final` once per finished reply), `POST api/ask|stop|reset`, `GET api/trace.json|replay.html`. POSTs must be `application/json` (blocks simple cross-site form posts). Long polling, not server-sent events, because Colab's port proxy may buffer streams. In Colab: `google.colab.output.serve_kernel_port_as_window`; Kaggle has no equivalent.
+- `model_watch/viewer.html`: one-screen replay viewer; opened directly it shows a made-up sample (`meta.sample: true`) with a dismissible "Start here" guide (Play, tap a word, tap a concept, Open trace.json). Reads trace versions 1 and 2. The one-screen layout applies at 1000x620 and up; narrower windows (phones) stack the panels and the page scrolls. On touch screens (`pointer: coarse`) transport buttons, speed menu and file picker grow to 44px, pills to 36px, concept rows and search to 40px, and timeline rows to 30px (`--row`); anything shown on hover must also work on tap (tapping a timeline cell selects that concept, jumps to that word and shows its activation). The concepts panel says "Active here does not prove it caused the word"; keep it. Live mode (`LIVE` set): ask box in the conversation card, `applyLive()` appends steps, `following` keeps `cur` on the newest word only while the user is on it, render functions must tolerate a trace with zero steps (`ready()`, `emptyState()`).
 - `docs/index.html`: the preview README tells people to start with (GitHub Pages from `/docs`). It must be an exact copy of `viewer.html`; after editing the viewer run `cp model_watch/viewer.html docs/index.html` (`tests/test_preview.py` checks).
 - `watch.py`: CLI (`--preset`, `--interactive`, `--compact`, `--quiet`, `--json`, `--html`, `--device-map auto`, `--sae-layers`; `--help` lists all).
-- `tests/test_model_watch.py` (torch + transformers, tiny random models) and `tests/test_preview.py` (standard library only; docs copy and sample placeholder).
+- `tests/test_model_watch.py` (torch + transformers, tiny random models), `tests/test_live.py` (live server over real HTTP on port 0) and `tests/test_preview.py` (standard library only; docs copy and sample placeholder).
 
 ## Decisions and gotchas
 
@@ -70,7 +72,6 @@ README.md has a "Known gaps" section written for the owner: it explains why clos
 
 ## Ideas for next steps
 
-- Live streaming into the full viewer (local web server with server-sent events; in Colab, `google.colab.output.serve_kernel_port_as_iframe`).
 - Neuronpedia-labeled concepts for Qwen3: mwhanna's Qwen3 transcoders (0.6B–14B, in SAELens and circuit-tracer) have Neuronpedia sources like `qwen3-1.7b/{L}-transcoder-hp-lowl0`, but they read the MLP input (`post_attention_layernorm` output), not the layer output, and their width and memory cost weren't checked.
 - Per-word attribution graphs via circuit-tracer (github.com/decoderesearch/circuit-tracer), which supports Gemma 3 transcoders from Gemma Scope 2.
 - Use each SAE folder's `examples.safetensors` (top activating examples) as an offline label source.

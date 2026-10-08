@@ -32,7 +32,7 @@
 [hidden]{display:none!important}
 html,body{margin:0}
 body{background:var(--bg);color:var(--fg);font-family:var(--font-body);font-size:14.5px;line-height:1.45;padding-block:12px 16px;padding-inline:16px}
-button,select,input{font:inherit;color:inherit}
+button,select,input,textarea{font:inherit;color:inherit}
 :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .mono{font-family:var(--font-mono)}
 
@@ -103,6 +103,15 @@ h1{margin:0;font-size:1.15rem;font-weight:600;letter-spacing:-0.01em;white-space
 .links{font-size:12px;color:var(--muted);margin-top:6px}
 .links a{color:var(--warm)}
 .empty{color:var(--muted);font-size:12.5px;margin:0}
+/* Live mode: ask box under the conversation */
+.ask{display:flex;flex-direction:column;gap:6px;margin-top:8px;padding-top:8px;border-top:1px solid var(--line);flex:none}
+.ask textarea{width:100%;resize:none;border:1px solid var(--line);border-radius:6px;padding:6px 9px;background:var(--bg);font-size:14px;line-height:1.4}
+.askrow{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
+.askrow .tb:disabled{opacity:.5;cursor:default}
+.livestatus{flex:1 1 10rem;min-width:0;color:var(--muted);font-size:12.5px}
+.saves{font-size:12px;color:var(--muted)}
+.saves a{color:var(--warm)}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
 
 svg.chart{display:block;width:100%;height:auto}
 svg.chart text{font-family:var(--font-mono);font-size:10px;fill:var(--muted)}
@@ -209,6 +218,17 @@ tr.set td{background:var(--accent-soft)}
         <div id="youbox" hidden><p class="who">You</p><p class="you" id="you"></p><p class="who">Model</p></div>
         <div class="text" id="text"></div>
         <div class="hl" id="hl" hidden></div>
+        <form class="ask" id="askform" hidden>
+          <label class="sr" for="askbox">Your message</label>
+          <textarea id="askbox" rows="2" placeholder="Ask something. Enter sends, Shift+Enter adds a line."></textarea>
+          <div class="askrow">
+            <span class="livestatus" id="livestatus" role="status" aria-live="polite"></span>
+            <button type="button" class="tb" id="stopbtn" hidden>Stop</button>
+            <button type="button" class="tb" id="newchat">New chat</button>
+            <button type="submit" class="tb play" id="send">Send</button>
+          </div>
+          <div class="saves" id="saves" hidden>Save this reply: <a href="api/replay.html">replay page</a> · <a href="api/trace.json">trace.json</a></div>
+        </form>
       </section>
       <section class="card choicecard">
         <h2>The choice</h2>
@@ -258,6 +278,7 @@ tr.set td{background:var(--accent-soft)}
 
 <script>
 const EMBEDDED = /*__TRACE_JSON__*/null;
+const LIVE = /*__LIVE__*/null; // {api: "api/"} when served by model_watch.live
 
 /* ---------- illustrative sample (made-up numbers, clearly labeled) ---------- */
 function sampleTrace(){
@@ -334,7 +355,7 @@ function validTrace(t){ return t && Array.isArray(t.steps) && t.steps.length > 0
 function normalize(t){
   t.meta = t.meta || {};
   t.feature_info = t.feature_info || {};
-  if (Array.isArray(t.steps[0].features) || typeof t.steps[0].active_count === "number") { // version 1
+  if (t.steps.length && (Array.isArray(t.steps[0].features) || typeof t.steps[0].active_count === "number")) { // version 1
     const layer = String(t.meta.sae_layer ?? 0);
     t.steps.forEach(s => {
       const rows = Array.isArray(s.features) ? s.features : [];
@@ -382,6 +403,13 @@ function load(t){
   layerSel = String(labeled.find(l => layers.includes(l)) ?? layers[Math.floor(layers.length / 2)] ?? "");
   $("banner").hidden = !trace.meta.sample;
   $("err").hidden = true;
+  renderMeta();
+  $("slider").max = String(trace.steps.length - 1);
+  renderPills();
+  render();
+}
+
+function renderMeta(){
   const m = trace.meta, bits = [];
   if (m.sample) bits.push("Sample data (made-up numbers)");
   if (m.model) bits.push(m.model);
@@ -389,9 +417,6 @@ function load(t){
   if (m.device) bits.push(`${m.device}${m.dtype ? " · " + m.dtype : ""}`);
   if (trace.created) bits.push(trace.created.replace("T", " "));
   $("meta").innerHTML = bits.map(b => `<span>${esc(b)}</span>`).join("");
-  $("slider").max = String(trace.steps.length - 1);
-  renderPills();
-  render();
 }
 
 /* ---------- conversation text ---------- */
@@ -527,6 +552,7 @@ function cellAt(e){
   return {i, ri};
 }
 function showCell({i, ri}){
+  if (!ready()) return;
   const rows = visibleRows();
   if (i < 0 || i >= trace.steps.length || ri < 0 || ri >= rows.length) { delete $("tlinfo").dataset.hover; return; }
   const key = rows[ri].key, v = idx.acts[key][i], inf = trace.feature_info[key];
@@ -536,6 +562,7 @@ function showCell({i, ri}){
 $("tlcanvas").addEventListener("mousemove", e => showCell(cellAt(e)));
 $("tlcanvas").addEventListener("pointerleave", e => { if (e.pointerType !== "mouse") return; delete $("tlinfo").dataset.hover; renderTimeline(); });
 $("tlcanvas").addEventListener("click", e => {
+  if (!ready()) return;
   const {i, ri} = cellAt(e), rows = visibleRows();
   stop();
   if (ri >= 0 && ri < rows.length) select(rows[ri].key, true);
@@ -625,7 +652,20 @@ function renderLens(st){
 }
 
 /* ---------- state ---------- */
+const ready = () => !!(trace && trace.steps.length);
+function emptyState(){
+  $("youbox").hidden = !(trace && trace.meta.chat);
+  if (trace) $("you").textContent = trace.prompt || "";
+  $("text").textContent = trace ? "Thinking…" : "Ask a question below to start watching.";
+  $("hl").hidden = true;
+  $("big").textContent = ""; $("pct").textContent = ""; $("alts").innerHTML = "";
+  $("concepts").innerHTML = `<p class="empty">The concepts active at each word appear here as the reply is written.</p>`;
+  $("chart").innerHTML = ""; $("summary").textContent = ""; $("tbody").innerHTML = "";
+  $("tllabels").innerHTML = ""; $("tlcanvas").width = 0; $("tlcanvas").height = 0;
+  $("tlinfo").textContent = ""; $("pos").textContent = ""; $("slider").max = "0";
+}
 function render(){
+  if (!ready()) return emptyState();
   const st = trace.steps[cur];
   $("slider").value = String(cur);
   $("pos").textContent = `Word ${cur + 1} of ${trace.steps.length}`;
@@ -643,10 +683,16 @@ function select(key, moveLayer){
   }
   render();
 }
-function go(i){ cur = Math.max(0, Math.min(trace.steps.length - 1, i)); render(); }
+function go(i){
+  if (!ready()) return;
+  cur = Math.max(0, Math.min(trace.steps.length - 1, i));
+  following = cur === trace.steps.length - 1; // live mode: keep up with new words only while on the latest one
+  render();
+}
 function stop(){ if (timer) { clearInterval(timer); timer = null; } $("play").textContent = "Play"; }
 function play(){
   if (timer) return stop();
+  if (!ready()) return;
   if (cur >= trace.steps.length - 1) go(0);
   $("play").textContent = "Pause";
   timer = setInterval(() => { if (cur >= trace.steps.length - 1) return stop(); go(cur + 1); }, +$("speed").value);
@@ -667,6 +713,7 @@ document.addEventListener("keydown", e => {
 });
 
 function readFile(file){
+  if (LIVE) return;
   const r = new FileReader();
   r.onload = () => {
     try {
@@ -685,13 +732,95 @@ $("file").addEventListener("change", e => { if (e.target.files[0]) readFile(e.ta
 let resizeTimer = null;
 window.addEventListener("resize", () => {
   clearTimeout(resizeTimer);
-  resizeTimer = setTimeout(() => { if (trace) { renderTimeline(); renderLens(trace.steps[cur]); } }, 120);
+  resizeTimer = setTimeout(() => { if (ready()) { renderTimeline(); renderLens(trace.steps[cur]); } }, 120);
 });
-if (window.matchMedia) window.matchMedia("(prefers-color-scheme: dark)").addEventListener?.("change", () => trace && renderTimeline());
+if (window.matchMedia) window.matchMedia("(prefers-color-scheme: dark)").addEventListener?.("change", () => ready() && renderTimeline());
 document.addEventListener("dragover", e => e.preventDefault());
 document.addEventListener("drop", e => { e.preventDefault(); if (e.dataTransfer.files[0]) readFile(e.dataTransfer.files[0]); });
 
-load(validTrace(EMBEDDED) ? EMBEDDED : sampleTrace());
+/* ---------- live mode: the reply fills in while the model writes it ---------- */
+let following = true;
+const live = {run: null, v: -1, final: false};
+
+function applyLive(d){
+  live.v = d.v;
+  if (d.run !== live.run) {
+    stop();
+    live.run = d.run; live.final = false;
+    concept = null; cur = 0; following = true;
+    if (!d.run || !d.header) { trace = null; idx = null; }
+    else {
+      trace = normalize({...d.header, steps: [], feature_info: {}, reply: ""});
+      const layers = trace.meta.sae_layers || [], labeled = trace.meta.labeled_layers || [];
+      layerSel = String(labeled.find(l => layers.includes(l)) ?? layers[Math.floor(layers.length / 2)] ?? "");
+      renderMeta(); renderPills();
+    }
+  }
+  if (trace) {
+    trace.steps.push(...d.steps);
+    Object.assign(trace.feature_info, d.feature_info || {});
+    if (d.final) { trace = normalize(d.final); live.final = true; }
+    idx = buildIndex(trace);
+    $("slider").max = String(Math.max(0, trace.steps.length - 1));
+    if (following) cur = Math.max(0, trace.steps.length - 1);
+  }
+  render();
+  $("livestatus").textContent = d.error ? `${d.status} ${d.error}` : d.status;
+  $("send").disabled = d.busy; $("newchat").disabled = d.busy; $("stopbtn").hidden = !d.busy;
+  $("saves").hidden = !live.final;
+}
+
+async function poll(){
+  for (;;) {
+    try {
+      const since = trace ? trace.steps.length : 0;
+      const r = await fetch(`${LIVE.api}state?run=${live.run ?? -1}&since=${since}&v=${live.v}`, {cache: "no-store"});
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      applyLive(await r.json());
+    } catch (err) {
+      console.error(err);
+      $("livestatus").textContent = "Lost contact with the model. Retrying…";
+      await new Promise(res => setTimeout(res, 2000));
+    }
+  }
+}
+
+async function post(route, body){
+  try {
+    const r = await fetch(LIVE.api + route, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body || {})});
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) $("livestatus").textContent = d.error || `Request failed (${r.status}).`;
+    return r.ok;
+  } catch (err) {
+    $("livestatus").textContent = "Could not reach the model. Is the notebook or watch.py --serve still running?";
+    return false;
+  }
+}
+
+function startLive(){
+  $("askform").hidden = false;
+  $("file").parentElement.hidden = true;
+  $("banner").hidden = true;
+  $("tlsub").textContent = "Strongest concepts across the whole reply. Columns are words; darker is more active.";
+  $("askform").addEventListener("submit", async e => {
+    e.preventDefault();
+    const message = $("askbox").value.trim();
+    if (!message || $("send").disabled) return;
+    $("send").disabled = true;
+    if (await post("ask", {message})) $("askbox").value = "";
+    else $("send").disabled = false;
+  });
+  $("askbox").addEventListener("keydown", e => {
+    if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); $("askform").requestSubmit(); }
+  });
+  $("stopbtn").addEventListener("click", () => post("stop"));
+  $("newchat").addEventListener("click", () => post("reset"));
+  render();
+  poll();
+}
+
+if (LIVE) startLive();
+else load(validTrace(EMBEDDED) ? EMBEDDED : sampleTrace());
 </script>
 </body>
 </html>

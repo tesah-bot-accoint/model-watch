@@ -2,6 +2,7 @@
 from .core import DEFAULT_PRESET, PRESETS, ModelWatcher, WatchConfig, feature_key, settled_layer
 from .export import export_html, save_json, trace_to_html
 from .labels import NeuronpediaLabels
+from .live import LiveServer
 from .render import describe, format_step, step_html
 from .sae import JumpReLUSAE
 
@@ -16,6 +17,7 @@ __all__ = [
     "save_json",
     "trace_to_html",
     "NeuronpediaLabels",
+    "LiveServer",
     "describe",
     "format_step",
     "step_html",
