@@ -120,7 +120,8 @@ class JumpReLUSAE(torch.nn.Module):
         every layer with l0 small or big only.
 
         Only params.safetensors is downloaded, not the larger examples file
-        next to it. Its tensor names were not checked against the real files;
+        next to it. Its tensor names (w_enc, w_dec, b_enc, b_dec, threshold) match
+        SAELens's Gemma Scope 2 loader but have not been loaded from the real files here;
         normalize_params accepts common spellings and lists the actual names
         if none match.
         """

@@ -32,7 +32,8 @@ from .sae import JumpReLUSAE
 
 Messages = list  # [{"role": "user" | "assistant", "content": str}, ...]
 
-# Verified against the Hugging Face repos and Neuronpedia, October 2026.
+# Repo paths, layers and Neuronpedia sources checked against SAELens's registry and
+# Neuronpedia, October 2026. Not yet loaded on a real run.
 PRESETS: dict[str, dict] = {
     "gemma-3-1b-it": dict(
         model_id="google/gemma-3-1b-it", sae_repo="google/gemma-scope-2-1b-it", sae_format="gemma-scope-2",

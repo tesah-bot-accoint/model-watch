@@ -107,7 +107,7 @@ You can see which concepts were active, but not which ones fed into which. The l
 
 ### Labels can be wrong or missing
 
-- Neuronpedia labels are written by an AI from examples where each concept fired. They are usually close, sometimes wrong, and many concepts have none. For the 4B model they only exist at layer 17.
+- Neuronpedia labels are written by an AI from examples where each concept fired. They are usually close, sometimes wrong, and many concepts have none. For the 4B model, Model Watch currently asks Neuronpedia only at layer 17.
 - The gray "pushes toward" words are calculated from the model itself, so they're always available. But they only describe which words a concept makes more likely, not what it means. They're noisy at early layers, where concepts are more about spelling and grammar than meaning.
 
 ### Early layers give rough guesses
@@ -122,9 +122,8 @@ Concrete things like places, names, code and dates show up clearly. Abstract, mu
 
 Everything has been tested on tiny, randomly built versions of Gemma 2 and Gemma 3. These have the same structure as the real models, but they're small enough to run without downloading anything. The first real run may surface small problems:
 
-- **Dictionary file format.** The concept dictionaries are Google's files. If their internal names differ from what the loader expects, the error message lists them, and the fix is one line in `model_watch/sae.py`.
+- **Dictionary file format.** The names inside Google's dictionary files have been checked against SAELens, a widely used library that loads the same files, and match what the loader expects. They haven't been loaded from the real files here yet. If they ever differ, the error message lists them, and the fix is one line in `model_watch/sae.py`.
 - **12B on two GPUs.** Splitting the 12B model across two GPUs (Kaggle) is written but untested.
-- **Neuronpedia's reply format.** The label lookup guesses where the label sits in Neuronpedia's reply. If it guesses wrong, written labels stay blank; the gray "pushes toward" words still show.
 
 ### Closest stand-ins for the big closed models
 
@@ -145,7 +144,7 @@ Not all of it is. The replay viewer (`model_watch/viewer.html`, copied to `docs/
 
 So the work is split. Python runs the model on a GPU and records everything to a file, and the web page replays that file anywhere.
 
-**Could it all run in a browser?** Only partly, for now. Tools such as Transformers.js can run a small model like Gemma 3 1B in a browser, but they return only the finished words, not each layer's numbers. The concept dictionaries are also large: each one for the 4B model is a few hundred megabytes, and Model Watch uses four, which is too much for most phones. A browser-only version with the 1B model and one dictionary is possible as an experiment, but it would be slow. The more practical next step is streaming a live Colab run into the web viewer, so you watch the reply form in the viewer while Python does the work on a free GPU.
+**Could it all run in a browser?** Only partly, for now. Tools such as Transformers.js can run a small model like Gemma 3 1B in a browser, but the ready-made browser versions of the model only hand back the finished words, not each layer's numbers. The concept dictionaries are also large: each one for the 4B model is a few hundred megabytes, and Model Watch uses four, which is too much for most phones. A browser-only version with the 1B model and one dictionary is possible as an experiment, but it would be slow. The more practical next step is streaming a live Colab run into the web viewer, so you watch the reply form in the viewer while Python does the work on a free GPU.
 
 ## Project layout
 
@@ -172,4 +171,4 @@ Run the tests with `python -m unittest discover -s tests -v`. They run offline. 
 
 - Gemma 3 and Gemma Scope 2 by Google DeepMind: <https://huggingface.co/google/gemma-scope-2>
 - Neuronpedia feature pages and labels: <https://www.neuronpedia.org>
-- Hugging Face `transformers`. This project does not use TransformerLens, whose 4.0 release removed the `HookedTransformer.from_pretrained` loader most tutorials still use.
+- Hugging Face `transformers`. This project does not use TransformerLens, whose 4.0 release removed `HookedTransformer` and its `from_pretrained` loader, which most tutorials still use.
