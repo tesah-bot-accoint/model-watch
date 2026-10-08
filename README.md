@@ -12,6 +12,17 @@ After each reply, a **one-screen replay viewer** shows the whole answer with a *
 
 It only observes. Nothing inside the model is switched off or changed.
 
+## Start here: try the preview
+
+Before installing anything, open the preview. It's the replay viewer loaded with a sample reply, so you can see what Model Watch shows. It runs in any browser, on a phone or a computer, with nothing to install and no account.
+
+- **On the web:** <https://tesah-bot-accoint.github.io/model-watch/> (works once GitHub Pages is turned on; see below).
+- **From this repo:** download `docs/index.html` and open it in a browser.
+
+The sample's numbers and labels are made up to show the layout. A short guide at the top of the page walks you through it: press Play, tap a word, tap a concept. To look at a real run, choose **Open trace.json** and pick a file saved by `watch.py --json` or the notebook.
+
+To put the preview on the web, the repo owner turns on GitHub Pages once: **Settings → Pages → Build and deployment → Deploy from a branch → `main`, folder `/docs` → Save**. The address above goes live a minute or two later.
+
 ## Free ways to run it
 
 | Where | Setup | Model |
@@ -134,6 +145,7 @@ model_watch/
   viewer.html  One-screen replay viewer (shows an illustrative sample if opened directly)
 watch.py       Terminal command
 notebooks/     Colab and Kaggle notebook
+docs/          The preview: a copy of viewer.html, served by GitHub Pages
 tests/         Runs everything on tiny random Gemma 2 and Gemma 3 models, no downloads
 ```
 

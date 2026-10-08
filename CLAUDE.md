@@ -26,7 +26,8 @@ The notebook `notebooks/model_watch.ipynb` is generated plain nbformat JSON; edi
 - `model_watch/labels.py`: `NeuronpediaLabels` (disk cache in `~/.cache/model-watch`, thread-safe, failures never cached, disables itself after 3 network failures).
 - `model_watch/render.py`: `format_step` (terminal), `step_html` (notebook live panel), `describe`.
 - `model_watch/export.py`: `save_json`, `export_html`, `trace_to_html` (injects JSON at `/*__TRACE_JSON__*/null`).
-- `model_watch/viewer.html`: one-screen replay viewer; opened directly it shows an illustrative sample with a banner. Reads trace versions 1 and 2.
+- `model_watch/viewer.html`: one-screen replay viewer; opened directly it shows an illustrative sample with a "Start here" guide. Reads trace versions 1 and 2. On touch screens (`pointer: coarse`) controls grow to 44px and timeline rows to 30px (`--row`); anything shown on hover must also work on tap.
+- `docs/index.html`: the preview README tells people to start with (GitHub Pages from `/docs`). It must be an exact copy of `viewer.html`; after editing the viewer run `cp model_watch/viewer.html docs/index.html` (`tests/test_preview.py` checks).
 - `watch.py`: CLI (`--preset`, `--interactive`, `--compact`, `--quiet`, `--device-map auto`, `--sae-layers`).
 
 ## Decisions and gotchas
