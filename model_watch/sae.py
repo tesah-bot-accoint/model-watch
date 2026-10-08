@@ -118,6 +118,11 @@ class JumpReLUSAE(torch.nn.Module):
         The main resid_post folder has 4 layers per model (about 25, 50, 65 and
         85 percent depth) with l0 small, medium or big. resid_post_all covers
         every layer with l0 small or big only.
+
+        Only params.safetensors is downloaded, not the larger examples file
+        next to it. Its tensor names were not checked against the real files;
+        normalize_params accepts common spellings and lists the actual names
+        if none match.
         """
         from huggingface_hub import hf_hub_download
 
