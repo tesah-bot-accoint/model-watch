@@ -168,14 +168,17 @@ class _Handler(BaseHTTPRequestHandler):
         pass
 
     def _send(self, status: int, body: bytes, kind: str, extra: dict | None = None) -> None:
-        self.send_response(status)
-        self.send_header("Content-Type", kind)
-        self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-store")
-        for name, value in (extra or {}).items():
-            self.send_header(name, value)
-        self.end_headers()
-        self.wfile.write(body)
+        try:
+            self.send_response(status)
+            self.send_header("Content-Type", kind)
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            for name, value in (extra or {}).items():
+                self.send_header(name, value)
+            self.end_headers()
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError):
+            self.close_connection = True  # the page was closed or reloaded while it waited; nothing to do
 
     def _json(self, data, status: int = 200) -> None:
         self._send(status, json.dumps(data, ensure_ascii=False).encode("utf-8"), "application/json; charset=utf-8")

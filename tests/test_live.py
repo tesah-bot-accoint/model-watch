@@ -146,3 +146,28 @@ class TestSelfCheck(unittest.TestCase):
         w.saes = {2: exact}
         report = run_checks(w, labels=False, live=False, log=lambda *_: None)
         self.assertIn(("PASS", "Concept dictionary at layer 2"), [(s, n) for s, n, _ in report.rows])
+
+
+class TestClosedPage(unittest.TestCase):
+    def test_closing_a_waiting_page_is_quiet(self):
+        """A browser that closes mid long-poll must not print a traceback."""
+        import io
+        import socket
+        import sys
+
+        server = LiveServer(make_watcher("gemma3", chat=True), log=lambda *_: None).start(port=0)
+        server.session.version = 1
+        errors, old = io.StringIO(), sys.stderr
+        sys.stderr = errors
+        try:
+            s = socket.create_connection(("127.0.0.1", server.port))
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, b"\x01\x00\x00\x00\x00\x00\x00\x00")
+            s.sendall(b"GET /api/state?v=1 HTTP/1.1\r\nHost: x\r\n\r\n")
+            time.sleep(0.2)
+            s.close()  # reset the connection while the server waits
+            server.session._changed(status="nudge")  # wake the waiting request so it tries to answer
+            time.sleep(0.5)
+        finally:
+            sys.stderr = old
+            server.stop()
+        self.assertNotIn("Traceback", errors.getvalue())
