@@ -133,6 +133,19 @@ Everything has been tested on tiny, randomly built versions of Gemma 2 and Gemma
 | GPT-OSS 20B | OpenAI's open-weight model, so the nearest look at an OpenAI-made model. circuit-tracer has a published dictionary for it | Unconfirmed; Model Watch would also need support for that dictionary format |
 | Llama 3.3 70B | Natural Language Autoencoders available on Neuronpedia | No, too large |
 
+## Why it's written in Python
+
+Not all of it is. The replay viewer (`model_watch/viewer.html`, copied to `docs/index.html`) is a web page written in HTML, CSS and JavaScript, so it runs on any phone or computer. The part that runs the model is Python, for four reasons:
+
+1. **Gemma ships for Python.** Google publishes Gemma through Hugging Face's `transformers` library, which runs on PyTorch. Both are Python.
+2. **Model Watch needs to see inside the model while it runs.** It attaches a small listener to every layer to copy out that layer's numbers as each word forms. PyTorch makes this simple. Most other ways of running a model only hand back the finished words.
+3. **The concept dictionaries are built for Python.** Google's Gemma Scope files and the research tools around them (Neuronpedia, circuit-tracer) all work in Python, so new tools can be added later without translating them.
+4. **The free GPUs are Python notebooks.** Colab and Kaggle run Python, and they're what keeps Model Watch free to run.
+
+So the work is split. Python runs the model on a GPU and records everything to a file, and the web page replays that file anywhere.
+
+**Could it all run in a browser?** Only partly, for now. Tools such as Transformers.js can run a small model like Gemma 3 1B in a browser, but they return only the finished words, not each layer's numbers. The concept dictionaries are also large: each one for the 4B model is a few hundred megabytes, and Model Watch uses four, which is too much for most phones. A browser-only version with the 1B model and one dictionary is possible as an experiment, but it would be slow. The more practical next step is streaming a live Colab run into the web viewer, so you watch the reply form in the viewer while Python does the work on a free GPU.
+
 ## Project layout
 
 ```
