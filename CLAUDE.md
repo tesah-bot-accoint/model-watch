@@ -12,7 +12,7 @@ The owner wants to **observe the model while it runs**, not ablate or steer it, 
 
 ```bash
 pip install -r requirements.txt            # or: pip install -e .
-python -m unittest discover -s tests -v    # offline; tiny random Gemma 2, Gemma 3 text and Gemma 3 multimodal
+python -m unittest discover -s tests -v    # offline; test_model_watch.py: tiny random Gemma 2, Gemma 3 text and Gemma 3 multimodal; test_preview.py: no torch needed
 python watch.py --prompt "Is AI a black box?"                   # needs HF_TOKEN + Gemma licenses accepted
 python watch.py --interactive --compact --html chat.html
 ```
@@ -21,14 +21,15 @@ The notebook `notebooks/model_watch.ipynb` is generated plain nbformat JSON; edi
 
 ## Layout
 
-- `model_watch/core.py`: `PRESETS`, `WatchConfig` (preset defaults fill any `None` field; `.resolved()`), `ModelWatcher` (`load`, `encode`, `step`, `watch`, `trace`, `add_labels`, `promotes`), `settled_layer`, `feature_key`.
+- `model_watch/core.py`: `PRESETS`, `WatchConfig` (preset defaults fill any `None` field; `.resolved()`), `ModelWatcher` (`load`, `encode`, `step`, `watch`, `trace`, `reply_text`, `add_labels`, `promotes`), `settled_layer`, `feature_key`.
 - `model_watch/sae.py`: `JumpReLUSAE`; `from_gemma_scope_1` (npz), `from_gemma_scope_2` (safetensors); `normalize_params` accepts key spellings like `w_enc`/`W_enc` and fixes transposed matrices using `b_dec`'s length.
 - `model_watch/labels.py`: `NeuronpediaLabels` (disk cache in `~/.cache/model-watch`, thread-safe, failures never cached, disables itself after 3 network failures).
 - `model_watch/render.py`: `format_step` (terminal), `step_html` (notebook live panel), `describe`.
 - `model_watch/export.py`: `save_json`, `export_html`, `trace_to_html` (injects JSON at `/*__TRACE_JSON__*/null`).
-- `model_watch/viewer.html`: one-screen replay viewer; opened directly it shows an illustrative sample with a "Start here" guide. Reads trace versions 1 and 2. On touch screens (`pointer: coarse`) controls grow to 44px and timeline rows to 30px (`--row`); anything shown on hover must also work on tap.
+- `model_watch/viewer.html`: one-screen replay viewer; opened directly it shows a made-up sample (`meta.sample: true`) with a dismissible "Start here" guide (Play, tap a word, tap a concept, Open trace.json). Reads trace versions 1 and 2. The one-screen layout applies at 1000x620 and up; narrower windows (phones) stack the panels and the page scrolls. On touch screens (`pointer: coarse`) transport buttons, speed menu and file picker grow to 44px, pills to 36px, concept rows and search to 40px, and timeline rows to 30px (`--row`); anything shown on hover must also work on tap (tapping a timeline cell selects that concept, jumps to that word and shows its activation). The concepts panel says "Active here does not prove it caused the word"; keep it.
 - `docs/index.html`: the preview README tells people to start with (GitHub Pages from `/docs`). It must be an exact copy of `viewer.html`; after editing the viewer run `cp model_watch/viewer.html docs/index.html` (`tests/test_preview.py` checks).
-- `watch.py`: CLI (`--preset`, `--interactive`, `--compact`, `--quiet`, `--device-map auto`, `--sae-layers`).
+- `watch.py`: CLI (`--preset`, `--interactive`, `--compact`, `--quiet`, `--json`, `--html`, `--device-map auto`, `--sae-layers`; `--help` lists all).
+- `tests/test_model_watch.py` (torch + transformers, tiny random models) and `tests/test_preview.py` (standard library only; docs copy and sample placeholder).
 
 ## Decisions and gotchas
 
@@ -42,7 +43,7 @@ The notebook `notebooks/model_watch.ipynb` is generated plain nbformat JSON; edi
 - **Gemma Scope 2 paths**: `google/gemma-scope-2-{size}-it/resid_post/layer_{L}_width_16k_l0_medium/params.safetensors` (each folder also has a large `examples.safetensors` we do not download). Main `resid_post` has 4 layers per model; `resid_post_all` has every layer but only l0 small/big. The tensor key names inside `params.safetensors` were not verified from here; `normalize_params` handles common spellings and raises with the actual key list if none match.
 - **Neuronpedia** sources verified to match the medium-L0 16k SAEs: `gemma-3-4b-it/17-gemmascope-2-res-16k`, `gemma-3-1b-it/13-...`, `gemma-3-12b-it/12-...`. Many 4B features have no explanation yet, which is why `promotes` (top tokens of `W_dec[f] @ W_U`) exists as a free label at every layer. API: `GET /api/feature/{model}/{source}/{index}`; response schema not verified, `parse_label` reads `explanations[0].description` with fallbacks.
 - Labels are fetched after generation by `add_labels` (parallel, capped, most-active first) so live display never waits on the network.
-- Stop tokens: tokenizer EOS plus `<end_of_turn>`. Steps carry `stop: true`; `reply` excludes them.
+- Stop tokens: tokenizer EOS plus `<end_of_turn>` and `<eos>` when the tokenizer has them. Steps carry `stop: true`; `reply` excludes them.
 - Tests must stay offline on tiny random models. Do not add tests that download weights.
 
 ## Trace JSON (version 2)
@@ -50,6 +51,7 @@ The notebook `notebooks/model_watch.ipynb` is generated plain nbformat JSON; edi
 ```
 { version: 2, created, prompt, messages|null, prompt_tokens, reply,
   meta: {preset, model, sae, sae_layers, labeled_layers, neuronpedia_model, neuronpedia_sources, device, dtype, chat, n_layers},
+        # preset, model, sae, neuronpedia_*, device, dtype come from ModelWatcher.load(); the viewer's built-in sample adds sample: true
   steps: [ { index, token, token_id, prob, stop,
              alternatives: [{token, token_id, prob}],
              lens: [{layer, top_token, top_prob, chosen_prob}],

@@ -8,7 +8,7 @@ For every word the model writes, Model Watch shows:
 2. **How the guess formed.** Every layer read as if the model stopped there (the "logit lens"), and the layer where the answer **settled**, meaning it became the top guess and never changed again.
 3. **Concepts at four depths.** Which features fired at four layers, from Google DeepMind's Gemma Scope 2 sparse autoencoders. Each feature gets a free offline label (the words it pushes the model toward), plus a Neuronpedia label where one exists.
 
-After each reply, a **one-screen replay viewer** shows the whole answer with a **concept timeline**: rows are concepts, columns are words. Click a concept and every word where it was active lights up in the text, so you can compare what the model says with what was active while it said it.
+After each reply, a **one-screen replay viewer** (on a phone, its panels stack) shows the whole answer with a **concept timeline**: rows are concepts, columns are words. Click a concept and every word where it was active lights up in the text, so you can compare what the model says with what was active while it said it.
 
 It only observes. Nothing inside the model is switched off or changed.
 
@@ -54,7 +54,7 @@ python watch.py --interactive --compact --html chat.html            # keep chatt
 python watch.py --preset gemma-3-12b-it --device-map auto --prompt "..."  # split across GPUs
 ```
 
-Useful flags: `--step` (Enter for each word), `--delay 0.5`, `--tokens 300`, `--sae-layers 9,22`, `--no-labels` (offline), `--device cpu`.
+Useful flags: `--step` (Enter for each word), `--delay 0.5`, `--tokens 300` (default 200), `--sae-layers 9,22`, `--json run.json` (save the trace for the viewer), `--no-labels` (offline), `--device cpu`. Run `python watch.py --help` for the full list.
 
 ### Presets
 
@@ -65,12 +65,12 @@ Useful flags: `--step` (Enter for each word), `--delay 0.5`, `--tokens 300`, `--
 | `gemma-3-12b-it` | 12, 24, 31, 41 of 48 | layer 12 | ~26 GB (2× T4 with `--device-map auto`) |
 | `gemma-2-2b` | 20 of 26 | layer 20 | ~6–11 GB, base model, no chat |
 
-Memory figures are estimates for bfloat16 weights plus four 16k-feature dictionaries. On a GPU without native bfloat16 (T4 and older), PyTorch emulates it: slower, same answers. float16 is never picked automatically because Gemma can overflow in it.
+Memory figures are estimates for bfloat16 weights plus the preset's 16k-feature dictionaries (four for Gemma 3, one for Gemma 2). On a GPU without native bfloat16 (T4 and older), PyTorch emulates it: slower, same answers. float16 is never picked automatically because Gemma can overflow in it.
 
 ## How to read it
 
-- **Concept timeline.** Switch layers with the pills. Early layers track wording and grammar; middle and late layers track topics and intent. Use "Find a concept" to search labels.
-- **Labels.** Black text is a Neuronpedia label. Gray "pushes toward" text is computed from the model's own weights and costs nothing. It is usually clearer at later layers.
+- **Concept timeline.** Switch layers with the pills. Early layers track wording and grammar; middle and late layers track topics and intent. Use "Find a concept" to search labels. Tap or click a square in the timeline to jump to that word, light up that concept, and see how strong it was there.
+- **Labels.** Text in the normal color is a Neuronpedia label. Gray "pushes toward" text is computed from the model's own weights and costs nothing. It is usually clearer at later layers.
 - **Settled at layer N.** Factual words often settle mid-to-late; small grammar words can settle early or stay undecided until the end.
 - **Says vs. active.** Ask the model to explain its reasoning, then light up concepts across that explanation. Agreement is evidence the explanation is faithful; mismatches are the gap current research studies.
 - **Limits.** See [Known gaps](#known-gaps) below.
@@ -124,6 +124,7 @@ Everything has been tested on tiny, randomly built versions of Gemma 2 and Gemma
 
 - **Dictionary file format.** The concept dictionaries are Google's files. If their internal names differ from what the loader expects, the error message lists them, and the fix is one line in `model_watch/sae.py`.
 - **12B on two GPUs.** Splitting the 12B model across two GPUs (Kaggle) is written but untested.
+- **Neuronpedia's reply format.** The label lookup guesses where the label sits in Neuronpedia's reply. If it guesses wrong, written labels stay blank; the gray "pushes toward" words still show.
 
 ### Closest stand-ins for the big closed models
 
@@ -155,14 +156,17 @@ model_watch/
   labels.py    Neuronpedia label lookups with a disk cache
   render.py    Terminal and notebook live display of one word
   export.py    Save a trace as JSON or a self-contained replay page
-  viewer.html  One-screen replay viewer (shows an illustrative sample if opened directly)
+  viewer.html  One-screen replay viewer (opened directly, shows a made-up sample with a "Start here" guide)
 watch.py       Terminal command
 notebooks/     Colab and Kaggle notebook
-docs/          The preview: a copy of viewer.html, served by GitHub Pages
-tests/         Runs everything on tiny random Gemma 2 and Gemma 3 models, no downloads
+docs/          The preview: index.html, an exact copy of viewer.html, served by GitHub Pages
+tests/
+  test_model_watch.py  Runs everything on tiny random Gemma 2 and Gemma 3 models, no downloads
+  test_preview.py      Checks docs/index.html still matches viewer.html (needs no PyTorch)
+requirements.txt, pyproject.toml   What to install
 ```
 
-Run the tests with `python -m unittest discover -s tests -v`.
+Run the tests with `python -m unittest discover -s tests -v`. They run offline. After changing `model_watch/viewer.html`, copy it to `docs/index.html` or `test_preview.py` fails.
 
 ## Built on
 

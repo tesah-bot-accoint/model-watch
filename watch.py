@@ -37,7 +37,7 @@ def parse_args(argv=None):
     p.add_argument("--html", help="Save a replay page (in interactive mode, one file per turn)")
     p.add_argument("--no-labels", action="store_true", help="Skip Neuronpedia lookups; keep the offline 'pushes toward' labels")
     p.add_argument("--label-lookups", type=int, default=400, help="Max Neuronpedia lookups after each reply, done only when saving with --html or --json (default 400)")
-    p.add_argument("--sae-layers", help="Comma-separated layers to read concepts from (default: the preset's four)")
+    p.add_argument("--sae-layers", help="Comma-separated layers to read concepts from (default: the preset's layers)")
     p.add_argument("--device", help="cuda, mps or cpu (default: best available)")
     p.add_argument("--device-map", choices=["auto"], help="Split a large model across all GPUs (for example Kaggle's 2x T4)")
     p.add_argument("--dtype", default="auto", choices=["auto", "float32", "bfloat16", "float16"])
