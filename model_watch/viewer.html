@@ -471,7 +471,8 @@ function renderTimeline(){
   if (!rows.length) {
     labels.innerHTML = "";
     $("tlcanvas").width = 0; $("tlcanvas").height = 0;
-    $("tlinfo").textContent = query ? `No concepts at layer ${layerSel} match "${query}".` : "No concept data at this layer.";
+    $("tlinfo").textContent = query ? `No concepts at layer ${layerSel} match "${query}".`
+      : (trace.meta.sae_layers || []).length ? "No concept data at this layer." : "This model has no concept dictionaries, so there is no timeline.";
     return;
   }
   labels.innerHTML = `<div class="spacer"></div>` + rows.map(r => {
@@ -573,7 +574,7 @@ function renderConcepts(st){
   }).join("");
   const sel = concept && trace.feature_info[concept];
   const link = sel && sel.url ? `<div class="links">Selected concept on Neuronpedia: <a href="${esc(sel.url)}" target="_blank" rel="noopener">#${esc(sel.index)}</a></div>` : "";
-  $("concepts").innerHTML = (html || `<p class="empty">No concept data in this trace.</p>`) + link;
+  $("concepts").innerHTML = (html || `<p class="empty">No concept data in this trace. This model has no concept dictionaries; the choice and the layer-by-layer guesses still work.</p>`) + link;
 }
 $("concepts").addEventListener("click", e => { const b = e.target.closest(".concept"); if (b) select(b.dataset.k === concept ? null : b.dataset.k, true); });
 

@@ -50,6 +50,20 @@ PRESETS: dict[str, dict] = {
         sae_layers=(12, 24, 31, 41), sae_width="16k", sae_l0="medium", chat=True,
         neuronpedia_model="gemma-3-12b-it", neuronpedia_sources={12: "12-gemmascope-2-res-16k"},
     ),
+    # Reasoning models: they write their thinking between <think> and </think>, then answer.
+    # Qwen-Scope dictionaries are Qwen's own, trained on Qwen3-1.7B-Base (not the thinking model),
+    # TopK with k = 50, every layer available; checked against SAELens's registry, October 2026.
+    # No Neuronpedia labels are wired up for them, so concepts show "pushes toward" words only.
+    "qwen3-1.7b": dict(
+        model_id="Qwen/Qwen3-1.7B", sae_repo="Qwen/SAE-Res-Qwen3-1.7B-Base-W32K-L0_50", sae_format="qwen-scope",
+        sae_layers=(7, 14, 18, 24), sae_width="32k", sae_l0=50, chat=True, thinking=True,
+        neuronpedia_model=None, neuronpedia_sources={},
+    ),
+    # No concept dictionaries: the choice and the per-layer guesses only.
+    "qwen3-4b": dict(
+        model_id="Qwen/Qwen3-4B", sae_repo=None, sae_format=None, sae_layers=(), chat=True, thinking=True,
+        neuronpedia_model=None, neuronpedia_sources={},
+    ),
     "gemma-2-2b": dict(
         model_id="google/gemma-2-2b", sae_repo="google/gemma-scope-2b-pt-res", sae_format="gemma-scope-1",
         sae_layers=(20,), sae_width="16k", sae_l0=71, chat=False,
@@ -65,11 +79,12 @@ class WatchConfig:
     # Anything left as None comes from the preset.
     model_id: Optional[str] = None
     sae_repo: Optional[str] = None
-    sae_format: Optional[str] = None  # "gemma-scope-2" or "gemma-scope-1"
+    sae_format: Optional[str] = None  # "gemma-scope-2", "gemma-scope-1" or "qwen-scope"; no SAEs if the preset has none
     sae_layers: Optional[tuple] = None
     sae_width: Optional[str] = None
     sae_l0: Optional[Union[str, int]] = None
     chat: Optional[bool] = None
+    thinking: Optional[bool] = None  # reasoning models: True shows the thinking, False asks for a direct answer
     neuronpedia_model: Optional[str] = None
     neuronpedia_sources: Optional[dict] = None
     labels: bool = True
@@ -164,6 +179,7 @@ class ModelWatcher:
         top_k_features: int = 10,
         promote_tokens: int = 5,
         meta: Optional[dict] = None,
+        thinking: Optional[bool] = None,
     ):
         self.model = model.eval()
         self.tok = tokenizer
@@ -180,6 +196,7 @@ class ModelWatcher:
                 raise ValueError(f"SAE layer {layer} is outside 0..{len(self.layers) - 1}")
         self.labelers = {int(k): v for k, v in (labelers or {}).items()}
         self.chat = chat
+        self.thinking = thinking
         self.top_k_tokens = top_k_tokens
         self.top_k_features = top_k_features
         self.promote_tokens = promote_tokens
@@ -196,7 +213,7 @@ class ModelWatcher:
         convert = getattr(self.tok, "convert_tokens_to_ids", None)
         unk = getattr(self.tok, "unk_token_id", None)
         if convert:
-            for name in ("<end_of_turn>", "<eos>"):
+            for name in ("<end_of_turn>", "<eos>", "<|im_end|>", "<|endoftext|>"):
                 try:
                     tid = convert(name)
                 except Exception:
@@ -219,6 +236,8 @@ class ModelWatcher:
         from transformers import AutoTokenizer
 
         cfg = (cfg or WatchConfig()).resolved()
+        if cfg.sae_layers and not cfg.sae_format:
+            raise ValueError(f"Preset {cfg.preset} has no concept dictionaries, so it cannot read layers {list(cfg.sae_layers)}.")
         device = pick_device(cfg.device)
         dtype = pick_dtype(cfg.dtype, device)
         dtype_name = str(dtype).replace("torch.", "")
@@ -249,6 +268,8 @@ class ModelWatcher:
             if cfg.sae_format == "gemma-scope-2":
                 saes[layer] = JumpReLUSAE.from_gemma_scope_2(cfg.sae_repo, layer, cfg.sae_width, cfg.sae_l0,
                                                              device=home, token=hf_token)
+            elif cfg.sae_format == "qwen-scope":
+                saes[layer] = JumpReLUSAE.from_qwen_scope(cfg.sae_repo, layer, device=home, token=hf_token)
             else:
                 saes[layer] = JumpReLUSAE.from_gemma_scope_1(cfg.sae_repo, layer, cfg.sae_width, cfg.sae_l0,
                                                              device=home, token=hf_token)
@@ -260,17 +281,18 @@ class ModelWatcher:
         meta = {
             "preset": cfg.preset,
             "model": cfg.model_id,
-            "sae": f"{cfg.sae_repo} ({cfg.sae_format}, width {cfg.sae_width}, L0 {cfg.sae_l0})",
+            "sae": f"{cfg.sae_repo} ({cfg.sae_format}, width {cfg.sae_width}, L0 {cfg.sae_l0})" if saes else None,
             "sae_layers": list(cfg.sae_layers),
             "neuronpedia_model": cfg.neuronpedia_model,
             "neuronpedia_sources": {str(k): v for k, v in cfg.neuronpedia_sources.items()},
             "device": "multi-GPU" if cfg.device_map else device,
             "dtype": dtype_name,
             "chat": bool(cfg.chat),
+            "thinking": cfg.thinking,
         }
         log("Ready.")
         return cls(model, tokenizer, saes, labelers, bool(cfg.chat), cfg.top_k_tokens, cfg.top_k_features,
-                   cfg.promote_tokens, meta)
+                   cfg.promote_tokens, meta, thinking=cfg.thinking)
 
     # ---- one forward pass -------------------------------------------------
 
@@ -405,8 +427,9 @@ class ModelWatcher:
         """Token ids for a plain prompt, or for a chat (string = one user message, or a message list)."""
         if self.chat:
             messages = [{"role": "user", "content": prompt}] if isinstance(prompt, str) else list(prompt)
+            extra = {} if self.thinking is None else {"enable_thinking": self.thinking}  # Qwen3's template reads this
             enc = self.tok.apply_chat_template(messages, add_generation_prompt=True, tokenize=True,
-                                               return_tensors="pt", return_dict=True)
+                                               return_tensors="pt", return_dict=True, **extra)
             ids = enc["input_ids"] if isinstance(enc, dict) or hasattr(enc, "keys") else enc
         else:
             if not isinstance(prompt, str):

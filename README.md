@@ -52,9 +52,10 @@ python watch.py --prompt "Is AI a black box?" --compact             # choice + c
 python watch.py --prompt "Why is the sky blue?" --quiet --html run.html   # just the text, then open run.html
 python watch.py --interactive --compact --html chat.html            # keep chatting; one replay per reply
 python watch.py --preset gemma-3-12b-it --device-map auto --prompt "..."  # split across GPUs
+python watch.py --preset qwen3-1.7b --prompt "Is 391 prime?" --compact     # a reasoning model: watch it think
 ```
 
-Useful flags: `--step` (Enter for each word), `--delay 0.5`, `--tokens 300` (default 200), `--sae-layers 9,22`, `--json run.json` (save the trace for the viewer), `--no-labels` (offline), `--device cpu`. Run `python watch.py --help` for the full list.
+Useful flags: `--step` (Enter for each word), `--delay 0.5`, `--tokens 300` (default 200, or 1000 for reasoning models), `--no-thinking` (reasoning models answer directly), `--sae-layers 9,22`, `--json run.json` (save the trace for the viewer), `--no-labels` (offline), `--device cpu`. Run `python watch.py --help` for the full list.
 
 ### Presets
 
@@ -64,8 +65,19 @@ Useful flags: `--step` (Enter for each word), `--delay 0.5`, `--tokens 300` (def
 | `gemma-3-4b-it` (default) | 9, 17, 22, 29 of 34 | layer 17 | ~10 GB |
 | `gemma-3-12b-it` | 12, 24, 31, 41 of 48 | layer 12 | ~26 GB (2× T4 with `--device-map auto`) |
 | `gemma-2-2b` | 20 of 26 | layer 20 | ~6–11 GB, base model, no chat |
+| `qwen3-1.7b` (reasoning) | 7, 14, 18, 24 of 28 | none | ~6 GB (CPU works but slow, about 10 GB of RAM) |
+| `qwen3-4b` (reasoning) | none: choice and layers only | none | ~9 GB |
 
-Memory figures are estimates for bfloat16 weights plus the preset's 16k-feature dictionaries (four for Gemma 3, one for Gemma 2). On a GPU without native bfloat16 (T4 and older), PyTorch emulates it: slower, same answers. float16 is never picked automatically because Gemma can overflow in it.
+Memory figures are estimates for bfloat16 weights plus the preset's dictionaries (four 16k-feature ones for Gemma 3, one for Gemma 2, four 32k-feature ones for `qwen3-1.7b`). On a GPU without native bfloat16 (T4 and older), PyTorch emulates it: slower, same answers. float16 is never picked automatically because Gemma can overflow in it.
+
+### Watching a reasoning model
+
+The two `qwen3` presets are reasoning models: before answering, they write out their thinking between `<think>` and `</think>`, then give the answer. Model Watch traces every word of both parts, so you can see things like whether the final answer was already the model's top guess partway through its thinking. Qwen models don't need a license click or `HF_TOKEN`.
+
+- **`qwen3-1.7b`** shows concepts from Qwen-Scope, Qwen's own published dictionaries. They were trained on the plain version of the model, before it learned to think step by step, so they may miss concepts that only the reasoning version uses. They have no Neuronpedia labels yet, so each concept shows only its gray "pushes toward" words.
+- **`qwen3-4b`** is the stronger thinker, but there's no matching dictionary for it, so it shows the choice and the layer-by-layer guesses without concepts.
+
+Thinking makes replies long, so these presets allow 1000 tokens per reply by default. Add `--no-thinking` to ask for a direct answer instead.
 
 ## How to read it
 
@@ -107,7 +119,7 @@ You can see which concepts were active, but not which ones fed into which. The l
 
 ### Labels can be wrong or missing
 
-- Neuronpedia labels are written by an AI from examples where each concept fired. They are usually close, sometimes wrong, and many concepts have none. For the 4B model, Model Watch currently asks Neuronpedia only at layer 17.
+- Neuronpedia labels are written by an AI from examples where each concept fired. They are usually close, sometimes wrong, and many concepts have none. For the 4B model, Model Watch currently asks Neuronpedia only at layer 17. The `qwen3` presets have no written labels at all yet.
 - The gray "pushes toward" words are calculated from the model itself, so they're always available. But they only describe which words a concept makes more likely, not what it means. They're noisy at early layers, where concepts are more about spelling and grammar than meaning.
 
 ### Early layers give rough guesses
@@ -120,10 +132,11 @@ Concrete things like places, names, code and dates show up clearly. Abstract, mu
 
 ### Not yet run on the real models
 
-Everything has been tested on tiny, randomly built versions of Gemma 2 and Gemma 3. These have the same structure as the real models, but they're small enough to run without downloading anything. The first real run may surface small problems:
+Everything has been tested on tiny, randomly built versions of Gemma 2, Gemma 3 and Qwen3. These have the same structure as the real models, but they're small enough to run without downloading anything. The first real run may surface small problems:
 
 - **Dictionary file format.** The names inside Google's dictionary files have been checked against SAELens, a widely used library that loads the same files, and match what the loader expects. They haven't been loaded from the real files here yet. If they ever differ, the error message lists them, and the fix is one line in `model_watch/sae.py`.
 - **12B on two GPUs.** Splitting the 12B model across two GPUs (Kaggle) is written but untested.
+- **Qwen-Scope dictionaries.** Their file layout comes from SAELens's loader, not from opening the real files. They were trained on the plain Qwen3 1.7B, and how well they read the thinking version is untested.
 
 ### Closest stand-ins for the big closed models
 
@@ -160,7 +173,7 @@ watch.py       Terminal command
 notebooks/     Colab and Kaggle notebook
 docs/          The preview: index.html, an exact copy of viewer.html, served by GitHub Pages
 tests/
-  test_model_watch.py  Runs everything on tiny random Gemma 2 and Gemma 3 models, no downloads
+  test_model_watch.py  Runs everything on tiny random Gemma 2, Gemma 3 and Qwen3 models, no downloads
   test_preview.py      Checks docs/index.html still matches viewer.html (needs no PyTorch)
 requirements.txt, pyproject.toml   What to install
 ```

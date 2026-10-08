@@ -1,4 +1,4 @@
-"""A minimal JumpReLU sparse autoencoder, the architecture Gemma Scope 1 and 2 use.
+"""A minimal sparse autoencoder: JumpReLU (Gemma Scope 1 and 2) or TopK (Qwen-Scope).
 
 Written out in full so you can read exactly what turns a layer's activations
 into a short list of "concepts" (features). No SAELens dependency.
@@ -24,7 +24,8 @@ def normalize_params(raw: dict) -> dict:
     """Map a checkpoint's tensors onto W_enc [d, n], W_dec [n, d], b_enc [n], b_dec [d], threshold [n].
 
     Handles different key spellings and transposed weight matrices, orienting
-    them using the length of b_dec (the model width d).
+    them using the length of b_dec (the model width d). threshold is optional:
+    TopK dictionaries (Qwen-Scope) have none.
     """
     lowered = {k.lower(): v for k, v in raw.items()}
     out = {}
@@ -33,7 +34,7 @@ def normalize_params(raw: dict) -> dict:
             if opt in lowered:
                 out[name] = torch.as_tensor(np.asarray(lowered[opt]) if not torch.is_tensor(lowered[opt]) else lowered[opt])
                 break
-    missing = set(_ALIASES) - set(out)
+    missing = set(_ALIASES) - set(out) - {"threshold"}
     if missing:
         raise ValueError(f"SAE checkpoint is missing {sorted(missing)}; found keys {sorted(raw)}")
     d = out["b_dec"].shape[-1]
@@ -42,7 +43,7 @@ def normalize_params(raw: dict) -> dict:
     if out["W_dec"].shape[-1] != d and out["W_dec"].shape[0] == d:
         out["W_dec"] = out["W_dec"].T.contiguous()
     n = out["W_enc"].shape[1]
-    if out["W_dec"].shape != (n, d) or out["b_enc"].shape[-1] != n or out["threshold"].shape[-1] != n:
+    if out["W_dec"].shape != (n, d) or out["b_enc"].shape[-1] != n or ("threshold" in out and out["threshold"].shape[-1] != n):
         raise ValueError(
             "SAE shapes do not line up: "
             + ", ".join(f"{k} {tuple(v.shape)}" for k, v in out.items())
@@ -54,18 +55,23 @@ class JumpReLUSAE(torch.nn.Module):
     """encode(x): which features fire, and how strongly.
 
     pre  = x @ W_enc + b_enc
-    acts = relu(pre) where pre > threshold, else 0     (the "jump")
-    decode(acts) = acts @ W_dec + b_dec                 (rebuilds x)
+    JumpReLU (Gemma Scope): acts = relu(pre) where pre > threshold, else 0   (the "jump")
+    TopK (Qwen-Scope):      acts = relu(pre) for the k largest pre, else 0
+    decode(acts) = acts @ W_dec + b_dec                                      (rebuilds x)
     Row W_dec[f] is feature f's direction in the model's activation space.
+    Pass threshold for JumpReLU, or threshold=None and k for TopK.
     """
 
-    def __init__(self, W_enc, W_dec, b_enc, b_dec, threshold):
+    def __init__(self, W_enc, W_dec, b_enc, b_dec, threshold=None, k: int | None = None):
         super().__init__()
+        if (threshold is None) == (k is None):
+            raise ValueError("Give a threshold (JumpReLU) or k (TopK), not both or neither.")
         self.W_enc = torch.nn.Parameter(torch.as_tensor(W_enc), requires_grad=False)
         self.W_dec = torch.nn.Parameter(torch.as_tensor(W_dec), requires_grad=False)
         self.b_enc = torch.nn.Parameter(torch.as_tensor(b_enc), requires_grad=False)
         self.b_dec = torch.nn.Parameter(torch.as_tensor(b_dec), requires_grad=False)
-        self.threshold = torch.nn.Parameter(torch.as_tensor(threshold), requires_grad=False)
+        self.threshold = None if threshold is None else torch.nn.Parameter(torch.as_tensor(threshold), requires_grad=False)
+        self.k = None if k is None else int(k)
 
     @property
     def d_model(self) -> int:
@@ -78,6 +84,9 @@ class JumpReLUSAE(torch.nn.Module):
     def encode(self, x: torch.Tensor) -> torch.Tensor:
         x = x.to(device=self.W_enc.device, dtype=self.W_enc.dtype)
         pre = x @ self.W_enc + self.b_enc
+        if self.k is not None:
+            top = pre.topk(min(self.k, pre.shape[-1]), dim=-1)
+            return torch.zeros_like(pre).scatter(-1, top.indices, torch.relu(top.values))
         return (pre > self.threshold) * torch.relu(pre)
 
     def decode(self, acts: torch.Tensor) -> torch.Tensor:
@@ -87,8 +96,13 @@ class JumpReLUSAE(torch.nn.Module):
         return self.decode(self.encode(x))
 
     @classmethod
-    def from_params(cls, raw: dict, device="cpu", dtype=torch.float32) -> "JumpReLUSAE":
-        return cls(**normalize_params(raw)).to(device=device, dtype=dtype)
+    def from_params(cls, raw: dict, device="cpu", dtype=torch.float32, k: int | None = None) -> "JumpReLUSAE":
+        params = normalize_params(raw)
+        if k is not None:
+            params.pop("threshold", None)
+        elif "threshold" not in params:
+            raise ValueError(f"SAE checkpoint has no threshold; pass k for a TopK SAE. Found keys {sorted(raw)}")
+        return cls(**params, k=k).to(device=device, dtype=dtype)
 
     @classmethod
     def from_npz(cls, path: str | Path, device="cpu", dtype=torch.float32) -> "JumpReLUSAE":
@@ -129,6 +143,27 @@ class JumpReLUSAE(torch.nn.Module):
 
         path = hf_hub_download(repo_id, f"{site}/layer_{layer}_width_{width}_l0_{l0}/params.safetensors", token=token)
         return cls.from_safetensors(path, device=device)
+
+    @classmethod
+    def from_qwen_scope(cls, repo_id="Qwen/SAE-Res-Qwen3-1.7B-Base-W32K-L0_50", layer=14,
+                        device="cpu", token=None) -> "JumpReLUSAE":
+        """Qwen-Scope (Qwen3): layer{layer}.sae.pt, a TopK SAE on the layer's output.
+
+        k comes from the repo name (L0_50 means k = 50). Format per SAELens's
+        qwen_scope loader: W_enc [n, d] and W_dec [d, n], both transposed here
+        by normalize_params. These were trained on the Base model, not the
+        chat/thinking model they are used with here.
+        """
+        import re
+
+        from huggingface_hub import hf_hub_download
+
+        match = re.search(r"L0_(\d+)", repo_id)
+        if not match:
+            raise ValueError(f"Cannot read k from Qwen-Scope repo name {repo_id!r} (expected ...-L0_<k>)")
+        path = hf_hub_download(repo_id, f"layer{layer}.sae.pt", token=token)
+        raw = torch.load(path, map_location="cpu", weights_only=True)
+        return cls.from_params(raw, device=device, k=int(match.group(1)))
 
     # Backwards-compatible name used by version 1.
     from_hub = from_gemma_scope_1

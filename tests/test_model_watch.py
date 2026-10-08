@@ -1,4 +1,4 @@
-"""Runs the whole pipeline on tiny random Gemma 2 and Gemma 3 models with random SAEs. No downloads.
+"""Runs the whole pipeline on tiny random Gemma 2, Gemma 3 and Qwen3 models with random SAEs. No downloads.
 
 python -m unittest discover -s tests -v
 """
@@ -20,6 +20,8 @@ from transformers import (  # noqa: E402
     Gemma3ForCausalLM,
     Gemma3ForConditionalGeneration,
     Gemma3TextConfig,
+    Qwen3Config,
+    Qwen3ForCausalLM,
 )
 
 from model_watch import (  # noqa: E402
@@ -57,7 +59,9 @@ class FakeTokenizer:
     def convert_tokens_to_ids(self, name):
         return {"<end_of_turn>": 96}.get(name, 0)
 
-    def apply_chat_template(self, messages, add_generation_prompt=True, tokenize=True, return_tensors="pt", return_dict=True):
+    def apply_chat_template(self, messages, add_generation_prompt=True, tokenize=True, return_tensors="pt", return_dict=True,
+                            **template_kwargs):
+        self.template_kwargs = template_kwargs
         text = "".join(f"[{m['role']}]{m['content']}" for m in messages) + ("[model]" if add_generation_prompt else "")
         return {"input_ids": self(text).input_ids}
 
@@ -77,6 +81,8 @@ def tiny(kind="gemma2", seed=0):
         return _random_norms(Gemma2ForCausalLM(Gemma2Config(**TEXT, attn_implementation="eager")))
     if kind == "gemma3":
         return _random_norms(Gemma3ForCausalLM(Gemma3TextConfig(**TEXT, attn_implementation="eager")))
+    if kind == "qwen3":
+        return _random_norms(Qwen3ForCausalLM(Qwen3Config(**TEXT, attn_implementation="eager")))
     cfg = Gemma3Config(text_config=TEXT, mm_tokens_per_image=4, attn_implementation="eager",
                        vision_config=dict(hidden_size=16, intermediate_size=32, num_hidden_layers=1,
                                           num_attention_heads=2, image_size=28, patch_size=14))
@@ -89,10 +95,17 @@ def random_sae(seed=0, threshold=0.5):
                        torch.zeros(FEATURES), torch.zeros(D), torch.full((FEATURES,), threshold))
 
 
-def make_watcher(kind="gemma2", chat=False, layers=(1, 4)):
-    labelers = {4: NeuronpediaLabels("test-model", "4-test-sae", enabled=False, log=lambda *_: None)}
-    return ModelWatcher(tiny(kind), FakeTokenizer(), {l: random_sae(l) for l in layers}, labelers, chat=chat,
-                        top_k_tokens=5, top_k_features=6, promote_tokens=4, meta={"model": kind})
+def random_topk_sae(seed=0, k=5):
+    g = torch.Generator().manual_seed(seed)
+    return JumpReLUSAE(torch.randn(D, FEATURES, generator=g), torch.randn(FEATURES, D, generator=g),
+                       torch.zeros(FEATURES), torch.zeros(D), k=k)
+
+
+def make_watcher(kind="gemma2", chat=False, layers=(1, 4), thinking=None):
+    labelers = {4: NeuronpediaLabels("test-model", "4-test-sae", enabled=False, log=lambda *_: None)} if 4 in layers else {}
+    make = random_topk_sae if kind == "qwen3" else random_sae
+    return ModelWatcher(tiny(kind), FakeTokenizer(), {l: make(l) for l in layers}, labelers, chat=chat,
+                        top_k_tokens=5, top_k_features=6, promote_tokens=4, meta={"model": kind}, thinking=thinking)
 
 
 class TestSettledLayer(unittest.TestCase):
@@ -107,7 +120,9 @@ class TestConfig(unittest.TestCase):
     def test_presets_resolve(self):
         for name in PRESETS:
             cfg = WatchConfig(preset=name).resolved()
-            self.assertTrue(cfg.model_id and cfg.sae_repo and cfg.sae_layers)
+            self.assertTrue(cfg.model_id)
+            if cfg.sae_layers:
+                self.assertTrue(cfg.sae_repo and cfg.sae_format)
             for layer in cfg.neuronpedia_sources:
                 self.assertIn(layer, cfg.sae_layers)
 
@@ -122,7 +137,7 @@ class TestConfig(unittest.TestCase):
 
 
 class TestWatcher(unittest.TestCase):
-    KINDS = ("gemma2", "gemma3", "gemma3-mm")
+    KINDS = ("gemma2", "gemma3", "gemma3-mm", "qwen3")
 
     def test_captured_layers_match_hidden_states(self):
         """Hooked layer outputs equal transformers' hidden states (except the last, which HF stores post-norm)."""
@@ -246,6 +261,26 @@ class TestWatcher(unittest.TestCase):
         self.assertEqual(len(labeled), n)
         self.assertTrue(all(v["layer"] == 4 for v in labeled))
 
+    def test_thinking_reaches_chat_template(self):
+        w = make_watcher("qwen3", chat=True, thinking=False)
+        w.encode("hi")
+        self.assertEqual(w.tok.template_kwargs, {"enable_thinking": False})
+        plain = make_watcher("gemma3", chat=True)
+        plain.encode("hi")
+        self.assertEqual(plain.tok.template_kwargs, {})
+
+    def test_no_saes(self):
+        """A preset without concept dictionaries still records the choice and the per-layer guesses."""
+        w = make_watcher("qwen3", chat=True, layers=())
+        trace = w.trace("hi", 3, stop_at_eos=False)
+        self.assertEqual(trace["meta"]["sae_layers"], [])
+        self.assertEqual(trace["feature_info"], {})
+        self.assertTrue(all(s["features"] == {} and len(s["lens"]) == LAYERS for s in trace["steps"]))
+        json.dumps(trace)
+        self.assertIn("Chose", format_step(trace["steps"][0], "", w.feature_info, style=Style(False)))
+        self.assertIn("Watching", step_html(trace["steps"][0], "", w.feature_info))
+        self.assertIn('"sae_layers": []', trace_to_html(trace))
+
     def test_bad_sae_layer(self):
         with self.assertRaises(ValueError):
             ModelWatcher(tiny(), FakeTokenizer(), {LAYERS: random_sae()})
@@ -255,6 +290,28 @@ class TestSAE(unittest.TestCase):
     def test_jump_threshold(self):
         sae = JumpReLUSAE(torch.eye(2), torch.eye(2), torch.zeros(2), torch.zeros(2), torch.tensor([0.5, 0.5]))
         torch.testing.assert_close(sae.encode(torch.tensor([[0.4, 0.9]])), torch.tensor([[0.0, 0.9]]))
+
+    def test_topk(self):
+        sae = JumpReLUSAE(torch.eye(3), torch.eye(3), torch.zeros(3), torch.zeros(3), k=2)
+        torch.testing.assert_close(sae.encode(torch.tensor([[0.5, -1.0, 2.0], [-3.0, -1.0, -2.0]])),
+                                   torch.tensor([[0.5, 0.0, 2.0], [0.0, 0.0, 0.0]]))
+        with self.assertRaises(ValueError):
+            JumpReLUSAE(torch.eye(2), torch.eye(2), torch.zeros(2), torch.zeros(2))
+
+    def test_qwen_scope_layout(self):
+        """Qwen-Scope stores W_enc as [n, d] and W_dec as [d, n] with no threshold (per SAELens's loader)."""
+        sae = random_topk_sae()
+        raw = {"W_enc": sae.W_enc.T.contiguous(), "W_dec": sae.W_dec.T.contiguous(),
+               "b_enc": sae.b_enc.clone(), "b_dec": sae.b_dec.clone()}
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "layer3.sae.pt")
+            torch.save({k: v.detach() for k, v in raw.items()}, path)
+            loaded = JumpReLUSAE.from_params(torch.load(path, weights_only=True), k=5)
+        x = torch.randn(3, D)
+        torch.testing.assert_close(loaded.encode(x), sae.encode(x))
+        self.assertEqual(int((loaded.encode(x) > 0).sum(-1).max()), 5)
+        with self.assertRaises(ValueError):
+            JumpReLUSAE.from_params(raw)  # no threshold and no k
 
     def test_npz_roundtrip(self):
         sae = random_sae()

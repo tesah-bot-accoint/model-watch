@@ -7,6 +7,7 @@ Examples:
   python watch.py --prompt "Why is the sky blue?" --step                # Enter for each word
   python watch.py --prompt "..." --compact --html run.html --json run.json
   python watch.py --interactive                                         # keep chatting, every reply traced
+  python watch.py --preset qwen3-1.7b --prompt "Is 391 prime?"          # a reasoning model: watch it think
 """
 from __future__ import annotations
 
@@ -26,7 +27,8 @@ def parse_args(argv=None):
     p.add_argument("--prompt", "-p", help="Your message (chat models) or text to continue (base models)")
     p.add_argument("--interactive", "-i", action="store_true", help="Keep chatting; every reply is traced")
     p.add_argument("--preset", default=DEFAULT_PRESET, choices=sorted(PRESETS), help=f"Model and dictionaries (default {DEFAULT_PRESET})")
-    p.add_argument("--tokens", "-n", type=int, default=200, help="Maximum words (tokens) per reply (default 200)")
+    p.add_argument("--tokens", "-n", type=int, help="Maximum words (tokens) per reply (default 200, or 1000 for reasoning models)")
+    p.add_argument("--no-thinking", action="store_true", help="Reasoning models: ask for a direct answer without the thinking")
     p.add_argument("--step", action="store_true", help="Pause after each word until you press Enter")
     p.add_argument("--delay", type=float, default=0.0, help="Seconds to wait between words")
     p.add_argument("--compact", action="store_true", help="Hide the per-layer table; show the choice and concepts only")
@@ -64,8 +66,10 @@ def main(argv=None) -> int:
         device=args.device,
         device_map=args.device_map,
         dtype=args.dtype,
+        thinking=False if args.no_thinking else None,
     )
     watcher = ModelWatcher.load(cfg, hf_token=os.environ.get("HF_TOKEN"))
+    max_tokens = args.tokens or (1000 if watcher.thinking else 200)
     style = Style(False if args.no_color else None)
     messages: list[dict] = []
     turn = 0
@@ -106,7 +110,7 @@ def main(argv=None) -> int:
         if args.quiet:
             print(style.bold("Model: "), end="")
         try:
-            trace = watcher.trace(prompt, args.tokens, on_step=on_step)
+            trace = watcher.trace(prompt, max_tokens, on_step=on_step)
         except KeyboardInterrupt:
             print("\nStopped.")
             return 130
