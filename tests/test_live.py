@@ -1,5 +1,6 @@
 """The live server, end to end over real HTTP on a random local port, with a tiny random model. No downloads."""
 import json
+import torch
 import time
 import unittest
 import urllib.error
@@ -114,3 +115,34 @@ class TestLive(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestSelfCheck(unittest.TestCase):
+    def test_runs_offline_on_tiny_models(self):
+        from model_watch.check import run_checks
+
+        lines = []
+        for kind in ("gemma3", "qwen3"):
+            w = make_watcher(kind, chat=True, thinking=None)
+            report = run_checks(w, labels=False, log=lines.append)
+            by_name = {name: status for status, name, _ in report.rows}
+            self.assertEqual(by_name["Reading every layer"], "PASS", lines)
+            self.assertEqual(by_name["Last layer's guess matches the model's real choice"], "PASS", lines)
+            self.assertEqual(by_name["Live viewer server"], "PASS", lines)
+            self.assertEqual(by_name["End-of-reply markers"], "PASS", lines)
+            # Random dictionaries can't rebuild the layer, so they must not pass.
+            self.assertTrue(all(by_name[f"Concept dictionary at layer {l}"] != "PASS" for l in (1, 4)))
+
+    def test_a_faithful_dictionary_passes(self):
+        """A dictionary that rebuilds the layer exactly (identity-like, ReLU on +x and -x) is reported as working."""
+        from model_watch import JumpReLUSAE
+        from model_watch.check import run_checks
+        from test_model_watch import D
+
+        eye = torch.eye(D)
+        exact = JumpReLUSAE(torch.cat([eye, -eye], 1), torch.cat([eye, -eye], 0), torch.zeros(2 * D), torch.zeros(D),
+                            torch.zeros(2 * D))
+        w = make_watcher("gemma3", chat=False, layers=())
+        w.saes = {2: exact}
+        report = run_checks(w, labels=False, live=False, log=lambda *_: None)
+        self.assertIn(("PASS", "Concept dictionary at layer 2"), [(s, n) for s, n, _ in report.rows])

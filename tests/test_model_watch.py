@@ -62,8 +62,12 @@ class FakeTokenizer:
     def apply_chat_template(self, messages, add_generation_prompt=True, tokenize=True, return_tensors="pt", return_dict=True,
                             **template_kwargs):
         self.template_kwargs = template_kwargs
-        text = "".join(f"[{m['role']}]{m['content']}" for m in messages) + ("[model]" if add_generation_prompt else "")
-        return {"input_ids": self(text).input_ids}
+        ids = [2]
+        for m in messages:  # like real chat formats, every finished turn ends with the end-of-turn marker (96)
+            ids += self(f"[{m['role']}]{m['content']}").input_ids[0, 1:].tolist() + [96]
+        if add_generation_prompt:
+            ids += self("[model]").input_ids[0, 1:].tolist()
+        return {"input_ids": torch.tensor([ids])}
 
 
 def _random_norms(model):

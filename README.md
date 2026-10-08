@@ -52,6 +52,7 @@ python watch.py --prompt "Is AI a black box?" --compact             # choice + c
 python watch.py --prompt "Why is the sky blue?" --quiet --html run.html   # just the text, then open run.html
 python watch.py --interactive --compact --html chat.html            # keep chatting; one replay per reply
 python watch.py --serve                                              # chat in the full viewer in your browser, live
+python watch.py --check                                              # check that the model, dictionaries, labels and live viewer work
 python watch.py --preset gemma-3-12b-it --device-map auto --prompt "..."  # split across GPUs
 python watch.py --preset qwen3-1.7b --prompt "Is 391 prime?" --compact     # a reasoning model: watch it think
 ```
@@ -142,11 +143,11 @@ Concrete things like places, names, code and dates show up clearly. Abstract, mu
 
 ### Not yet run on the real models
 
-Everything has been tested on tiny, randomly built versions of Gemma 2, Gemma 3 and Qwen3. These have the same structure as the real models, but they're small enough to run without downloading anything. The first real run may surface small problems:
+Everything has been tested on tiny, randomly built versions of Gemma 2, Gemma 3 and Qwen3. These have the same structure as the real models, but they're small enough to run without downloading anything. To find out whether everything works on a real model, run `python watch.py --check` or notebook section 3b. It tests each item below on the real files and prints PASS, WARN or FAIL in plain words. Until someone runs it, these are open:
 
 - **Dictionary file format.** The names inside Google's dictionary files have been checked against SAELens, a widely used library that loads the same files, and match what the loader expects. They haven't been loaded from the real files here yet. If they ever differ, the error message lists them, and the fix is one line in `model_watch/sae.py`.
 - **12B on two GPUs.** Splitting the 12B model across two GPUs (Kaggle) is written but untested.
-- **Live viewer in Colab.** It has been tested in a browser on this computer with a tiny model, not yet through Colab's link to a notebook's web server.
+- **Live viewer in Colab.** It has been tested in a browser with a tiny model. In Colab it uses `serve_kernel_port_as_iframe`, the method Colab's own code recommends (its new-tab variant is broken by browser security changes), but it hasn't been opened through Colab yet.
 - **Qwen-Scope dictionaries.** Their file layout comes from SAELens's loader, not from opening the real files. They were trained on the plain Qwen3 1.7B, and how well they read the thinking version is untested.
 
 ### Closest stand-ins for the big closed models
@@ -180,6 +181,7 @@ model_watch/
   render.py    Terminal and notebook live display of one word
   export.py    Save a trace as JSON or a self-contained replay page
   live.py      Small web server for the live viewer (watch.py --serve, notebook section 4b)
+  check.py     Self-check on a real model (watch.py --check, notebook section 3b)
   viewer.html  One-screen replay viewer (opened directly, shows a made-up sample with a "Start here" guide)
 watch.py       Terminal command
 notebooks/     Colab and Kaggle notebook

@@ -7,6 +7,7 @@ Examples:
   python watch.py --prompt "Why is the sky blue?" --step                # Enter for each word
   python watch.py --prompt "..." --compact --html run.html --json run.json
   python watch.py --interactive                                         # keep chatting, every reply traced
+  python watch.py --preset qwen3-1.7b --check                          # check the model, dictionaries, labels and live viewer
   python watch.py --serve                                               # chat in the full viewer and watch it fill in live
   python watch.py --preset qwen3-1.7b --prompt "Is 391 prime?"          # a reasoning model: watch it think
 """
@@ -27,6 +28,7 @@ def parse_args(argv=None):
     p = argparse.ArgumentParser(description="Watch a language model choose each word.")
     p.add_argument("--prompt", "-p", help="Your message (chat models) or text to continue (base models)")
     p.add_argument("--interactive", "-i", action="store_true", help="Keep chatting; every reply is traced")
+    p.add_argument("--check", action="store_true", help="Load the model and check that everything works, then exit")
     p.add_argument("--serve", action="store_true", help="Chat in the full viewer in your browser; replies fill in live")
     p.add_argument("--port", type=int, default=8765, help="Port for --serve (default 8765)")
     p.add_argument("--host", default="127.0.0.1", help="Address for --serve (default 127.0.0.1: this computer only)")
@@ -49,8 +51,8 @@ def parse_args(argv=None):
     p.add_argument("--dtype", default="auto", choices=["auto", "float32", "bfloat16", "float16"])
     p.add_argument("--no-color", action="store_true")
     args = p.parse_args(argv)
-    if not args.prompt and not args.interactive and not args.serve:
-        p.error("give --prompt, or use --interactive or --serve")
+    if not args.prompt and not args.interactive and not args.serve and not args.check:
+        p.error("give --prompt, or use --interactive, --serve or --check")
     return args
 
 
@@ -74,6 +76,10 @@ def main(argv=None) -> int:
     )
     watcher = ModelWatcher.load(cfg, hf_token=os.environ.get("HF_TOKEN"))
     max_tokens = args.tokens or (1000 if watcher.thinking else 200)
+    if args.check:
+        from model_watch.check import run_checks
+
+        return 0 if run_checks(watcher, labels=not args.no_labels).ok else 1
     if args.serve:
         return serve(watcher, args, max_tokens)
     style = Style(False if args.no_color else None)
