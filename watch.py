@@ -7,6 +7,9 @@ Examples:
   python watch.py --prompt "Why is the sky blue?" --step                # Enter for each word
   python watch.py --prompt "..." --compact --html run.html --json run.json
   python watch.py --interactive                                         # keep chatting, every reply traced
+  python watch.py --preset qwen3-1.7b --check                          # check the model, dictionaries, labels and live viewer
+  python watch.py --serve                                               # chat in the full viewer and watch it fill in live
+  python watch.py --preset qwen3-1.7b --prompt "Is 391 prime?"          # a reasoning model: watch it think
 """
 from __future__ import annotations
 
@@ -25,8 +28,13 @@ def parse_args(argv=None):
     p = argparse.ArgumentParser(description="Watch a language model choose each word.")
     p.add_argument("--prompt", "-p", help="Your message (chat models) or text to continue (base models)")
     p.add_argument("--interactive", "-i", action="store_true", help="Keep chatting; every reply is traced")
+    p.add_argument("--check", action="store_true", help="Load the model and check that everything works, then exit")
+    p.add_argument("--serve", action="store_true", help="Chat in the full viewer in your browser; replies fill in live")
+    p.add_argument("--port", type=int, default=8765, help="Port for --serve (default 8765)")
+    p.add_argument("--host", default="127.0.0.1", help="Address for --serve (default 127.0.0.1: this computer only)")
     p.add_argument("--preset", default=DEFAULT_PRESET, choices=sorted(PRESETS), help=f"Model and dictionaries (default {DEFAULT_PRESET})")
-    p.add_argument("--tokens", "-n", type=int, default=200, help="Maximum words (tokens) per reply (default 200)")
+    p.add_argument("--tokens", "-n", type=int, help="Maximum words (tokens) per reply (default 200, or 1000 for reasoning models)")
+    p.add_argument("--no-thinking", action="store_true", help="Reasoning models: ask for a direct answer without the thinking")
     p.add_argument("--step", action="store_true", help="Pause after each word until you press Enter")
     p.add_argument("--delay", type=float, default=0.0, help="Seconds to wait between words")
     p.add_argument("--compact", action="store_true", help="Hide the per-layer table; show the choice and concepts only")
@@ -36,15 +44,15 @@ def parse_args(argv=None):
     p.add_argument("--json", help="Save the trace as JSON (in interactive mode, one file per turn)")
     p.add_argument("--html", help="Save a replay page (in interactive mode, one file per turn)")
     p.add_argument("--no-labels", action="store_true", help="Skip Neuronpedia lookups; keep the offline 'pushes toward' labels")
-    p.add_argument("--label-lookups", type=int, default=400, help="Max Neuronpedia lookups after each reply (default 400)")
-    p.add_argument("--sae-layers", help="Comma-separated layers to read concepts from (default: the preset's four)")
+    p.add_argument("--label-lookups", type=int, default=400, help="Max Neuronpedia lookups after each reply, done only when saving with --html or --json (default 400)")
+    p.add_argument("--sae-layers", help="Comma-separated layers to read concepts from (default: the preset's layers)")
     p.add_argument("--device", help="cuda, mps or cpu (default: best available)")
     p.add_argument("--device-map", choices=["auto"], help="Split a large model across all GPUs (for example Kaggle's 2x T4)")
     p.add_argument("--dtype", default="auto", choices=["auto", "float32", "bfloat16", "float16"])
     p.add_argument("--no-color", action="store_true")
     args = p.parse_args(argv)
-    if not args.prompt and not args.interactive:
-        p.error("give --prompt, or use --interactive")
+    if not args.prompt and not args.interactive and not args.serve and not args.check:
+        p.error("give --prompt, or use --interactive, --serve or --check")
     return args
 
 
@@ -64,8 +72,16 @@ def main(argv=None) -> int:
         device=args.device,
         device_map=args.device_map,
         dtype=args.dtype,
+        thinking=False if args.no_thinking else None,
     )
     watcher = ModelWatcher.load(cfg, hf_token=os.environ.get("HF_TOKEN"))
+    max_tokens = args.tokens or (1000 if watcher.thinking else 200)
+    if args.check:
+        from model_watch.check import run_checks
+
+        return 0 if run_checks(watcher, labels=not args.no_labels).ok else 1
+    if args.serve:
+        return serve(watcher, args, max_tokens)
     style = Style(False if args.no_color else None)
     messages: list[dict] = []
     turn = 0
@@ -106,7 +122,7 @@ def main(argv=None) -> int:
         if args.quiet:
             print(style.bold("Model: "), end="")
         try:
-            trace = watcher.trace(prompt, args.tokens, on_step=on_step)
+            trace = watcher.trace(prompt, max_tokens, on_step=on_step)
         except KeyboardInterrupt:
             print("\nStopped.")
             return 130
@@ -124,6 +140,21 @@ def main(argv=None) -> int:
             print(f"Saved replay page: {export_html(trace, numbered(args.html, turn, args.interactive))}")
         if not args.interactive:
             return 0
+
+
+def serve(watcher, args, max_tokens: int) -> int:
+    from model_watch.live import LiveServer
+
+    live = LiveServer(watcher, max_new_tokens=max_tokens, labels=not args.no_labels,
+                      label_lookups=args.label_lookups, delay=args.delay).start(args.port, args.host)
+    print(f"Open {live.url} in your browser, ask a question, and watch the reply form. Ctrl+C to quit.")
+    try:
+        while True:
+            time.sleep(3600)
+    except KeyboardInterrupt:
+        live.stop()
+        print()
+        return 0
 
 
 if __name__ == "__main__":

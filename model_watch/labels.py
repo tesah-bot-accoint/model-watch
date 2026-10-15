@@ -3,6 +3,10 @@
 Labels are best-effort. If Neuronpedia is unreachable or its response shape
 changes, features show without a label and the viewer still links to the
 feature's Neuronpedia page.
+
+Answers, including "no label", are saved in ~/.cache/model-watch (or the
+folder in MODEL_WATCH_CACHE). Network failures are never saved, and after
+3 failures in a row lookups stop for the rest of the run.
 """
 from __future__ import annotations
 
@@ -107,7 +111,7 @@ class NeuronpediaLabels:
             self._failures = 0
             return True, parse_label(data)
         except urllib.error.HTTPError as err:
-            if err.code == 404:  # feature exists but has no page data: a real "no label"
+            if err.code == 404:  # Neuronpedia has nothing for this feature: a real "no label", not a failure
                 return True, None
             return self._failed(err)
         except (urllib.error.URLError, TimeoutError, ValueError, OSError) as err:
