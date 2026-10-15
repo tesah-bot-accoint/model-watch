@@ -43,7 +43,11 @@ python watch.py --interactive --compact --html chat.html            # keep chatt
 python watch.py --preset gemma-3-12b-it --device-map auto --prompt "..."  # split across GPUs
 ```
 
-Useful flags: `--step` (Enter for each word), `--delay 0.5`, `--tokens 300`, `--sae-layers 9,22`, `--no-labels` (offline), `--device cpu`.
+Useful flags: `--step` (Enter for each word), `--delay 0.5`, `--tokens 300`, `--sae-layers 9,22`, `--no-labels` (offline), `--device cpu`, `--model-revision <commit>` and `--sae-revision <commit>` (use an exact version of the model files).
+
+**If a reply is stopped or fails.** Press Ctrl+C, or hit an error, and the words written so far are still saved to your `--json`/`--html` files, marked as a partial reply. The command prints a `--resume` line that finishes the same reply later with the same result. In `--interactive` mode an error ends only that reply, not the conversation. While a reply is being written, it is saved step by step to `~/.cache/model-watch/runs` (only your user account can read it). That file is deleted when the reply finishes, and leftovers are removed after 7 days. Use `--no-checkpoint` to turn this off.
+
+**Conversations.** Each new turn gives the model back exactly the words it wrote, rather than retyping them as text, which can change emoji and some other characters. If someone types the model's hidden turn markers (like `<start_of_turn>`) into a message, they are treated as ordinary text, so a message can't pretend to be a reply from the model.
 
 ### Presets
 
@@ -113,6 +117,8 @@ Everything has been tested on tiny, randomly built versions of Gemma 2 and Gemma
 
 - **Dictionary file format.** The concept dictionaries are Google's files. If their internal names differ from what the loader expects, the error message lists them, and the fix is one line in `model_watch/sae.py`.
 - **12B on two GPUs.** Splitting the 12B model across two GPUs (Kaggle) is written but untested.
+- **Conversation handling.** Giving the model back its exact words between turns, and treating typed turn markers as text, were tested with a small stand-in that works like Gemma's tokenizer (the part that splits text into tokens), not with Gemma's own. If the exact words can't be lined up, Model Watch falls back to the old way of rebuilding the conversation from text, and the trace records which way was used (`exact_history`). The turn-marker protection needs `transformers` 5 or newer; on older versions, a message that contains a turn marker is refused.
+- **Exact versions.** The presets download the newest version of each model file. Use `--model-revision`/`--sae-revision` to choose an exact version. Every trace records the version it actually used, so you can repeat a run.
 
 ### Closest stand-ins for the big closed models
 
@@ -127,6 +133,7 @@ Everything has been tested on tiny, randomly built versions of Gemma 2 and Gemma
 ```
 model_watch/
   core.py      Presets, ModelWatcher: chat, cached generation, logit lens, multi-layer concepts, labels
+  graph.py     How each reply runs (encode, generate, assemble), with step-by-step saving so stopped replies can be finished
   sae.py       JumpReLU sparse autoencoder; loads Gemma Scope 1 (.npz) and 2 (.safetensors)
   labels.py    Neuronpedia label lookups with a disk cache
   render.py    Terminal and notebook live display of one word

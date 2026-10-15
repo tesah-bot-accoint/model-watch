@@ -7,6 +7,7 @@ Examples:
   python watch.py --prompt "Why is the sky blue?" --step                # Enter for each word
   python watch.py --prompt "..." --compact --html run.html --json run.json
   python watch.py --interactive                                         # keep chatting, every reply traced
+  python watch.py --resume ~/.cache/model-watch/runs/<run>.jsonl --html run.html   # finish an interrupted reply
 """
 from __future__ import annotations
 
@@ -41,10 +42,15 @@ def parse_args(argv=None):
     p.add_argument("--device", help="cuda, mps or cpu (default: best available)")
     p.add_argument("--device-map", choices=["auto"], help="Split a large model across all GPUs (for example Kaggle's 2x T4)")
     p.add_argument("--dtype", default="auto", choices=["auto", "float32", "bfloat16", "float16"])
+    p.add_argument("--model-revision", help="Pin the model and tokenizer to a Hub branch, tag or commit")
+    p.add_argument("--sae-revision", help="Pin the concept dictionaries to a Hub branch, tag or commit")
+    p.add_argument("--no-checkpoint", action="store_true",
+                   help="Don't checkpoint replies to ~/.cache/model-watch/runs (then an interrupted reply can't be resumed)")
+    p.add_argument("--resume", metavar="CHECKPOINT", help="Finish an interrupted reply from its checkpoint file")
     p.add_argument("--no-color", action="store_true")
     args = p.parse_args(argv)
-    if not args.prompt and not args.interactive:
-        p.error("give --prompt, or use --interactive")
+    if not args.prompt and not args.interactive and not args.resume:
+        p.error("give --prompt, use --interactive, or --resume a checkpoint")
     return args
 
 
@@ -64,27 +70,33 @@ def main(argv=None) -> int:
         device=args.device,
         device_map=args.device_map,
         dtype=args.dtype,
+        model_revision=args.model_revision,
+        sae_revision=args.sae_revision,
+        checkpoints=not args.no_checkpoint,
     )
     watcher = ModelWatcher.load(cfg, hf_token=os.environ.get("HF_TOKEN"))
     style = Style(False if args.no_color else None)
     messages: list[dict] = []
+    previous: dict | None = None  # last complete chat turn; the next one continues from its exact token ids
     turn = 0
 
+    def save(trace: dict) -> None:
+        if not args.no_labels and (args.html or args.json) and trace.get("complete", True):
+            watcher.add_labels(trace, max_lookups=args.label_lookups)
+        if args.json:
+            print(f"Saved trace: {save_json(trace, numbered(args.json, turn, args.interactive))}")
+        if args.html:
+            print(f"Saved replay page: {export_html(trace, numbered(args.html, turn, args.interactive))}")
+
+    def stopped(err: BaseException, why: str) -> None:
+        print("\n" + why)
+        partial = getattr(err, "partial_trace", None)
+        if partial and partial["steps"]:
+            save(partial)
+        if getattr(err, "checkpoint", None):
+            print(style.dim(f"Resume with: python watch.py --resume {err.checkpoint} --preset {args.preset}"))
+
     while True:
-        if args.interactive:
-            try:
-                user = input(style.bold("\nYou: ")).strip()
-            except (EOFError, KeyboardInterrupt):
-                print()
-                return 0
-            if not user:
-                continue
-            if user.lower() in {"exit", "quit"}:
-                return 0
-        else:
-            user = args.prompt
-        turn += 1
-        prompt = (messages + [{"role": "user", "content": user}]) if watcher.chat else user
         reply = ""
 
         def on_step(record, _steps):
@@ -103,25 +115,47 @@ def main(argv=None) -> int:
             elif args.delay:
                 time.sleep(args.delay)
 
+        if args.resume:
+            resume, args.resume = args.resume, None
+            turn += 1
+            run = lambda: watcher.resume(resume, on_step=on_step)  # noqa: E731
+        else:
+            if args.interactive:
+                try:
+                    user = input(style.bold("\nYou: ")).strip()
+                except (EOFError, KeyboardInterrupt):
+                    print()
+                    return 0
+                if not user:
+                    continue
+                if user.lower() in {"exit", "quit"}:
+                    return 0
+            else:
+                user = args.prompt
+            turn += 1
+            prompt = (messages + [{"role": "user", "content": user}]) if watcher.chat else user
+            run = lambda: watcher.trace(prompt, args.tokens, on_step=on_step, continue_from=previous)  # noqa: E731
+
         if args.quiet:
             print(style.bold("Model: "), end="")
         try:
-            trace = watcher.trace(prompt, args.tokens, on_step=on_step)
-        except KeyboardInterrupt:
-            print("\nStopped.")
+            trace = run()
+        except KeyboardInterrupt as err:
+            stopped(err, "Stopped.")
             return 130
+        except Exception as err:  # keep the session (and the conversation so far) alive
+            stopped(err, f"This reply failed: {err}")
+            if not args.interactive:
+                return 1
+            continue
 
         print("\n" + style.dim("─" * 72))
         if not args.quiet:
             print(style.bold("Reply: ") + trace["reply"])
         if watcher.chat:
-            messages = prompt + [{"role": "assistant", "content": trace["reply"]}]
-        if not args.no_labels and (args.html or args.json):
-            watcher.add_labels(trace, max_lookups=args.label_lookups)
-        if args.json:
-            print(f"Saved trace: {save_json(trace, numbered(args.json, turn, args.interactive))}")
-        if args.html:
-            print(f"Saved replay page: {export_html(trace, numbered(args.html, turn, args.interactive))}")
+            messages = (trace["messages"] or []) + [{"role": "assistant", "content": trace["reply"]}]
+            previous = trace
+        save(trace)
         if not args.interactive:
             return 0
 

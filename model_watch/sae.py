@@ -50,6 +50,16 @@ def normalize_params(raw: dict) -> dict:
     return out
 
 
+def snapshot_revision(path) -> str | None:
+    """The commit hash in a Hugging Face cache path (.../snapshots/<commit>/...), if there is one."""
+    parts = Path(path).parts
+    if "snapshots" in parts:
+        i = parts.index("snapshots")
+        if i + 1 < len(parts):
+            return parts[i + 1]
+    return None
+
+
 class JumpReLUSAE(torch.nn.Module):
     """encode(x): which features fire, and how strongly.
 
@@ -66,6 +76,7 @@ class JumpReLUSAE(torch.nn.Module):
         self.b_enc = torch.nn.Parameter(torch.as_tensor(b_enc), requires_grad=False)
         self.b_dec = torch.nn.Parameter(torch.as_tensor(b_dec), requires_grad=False)
         self.threshold = torch.nn.Parameter(torch.as_tensor(threshold), requires_grad=False)
+        self.revision = None  # Hub commit, when loaded from the Hub
 
     @property
     def d_model(self) -> int:
@@ -92,8 +103,8 @@ class JumpReLUSAE(torch.nn.Module):
 
     @classmethod
     def from_npz(cls, path: str | Path, device="cpu", dtype=torch.float32) -> "JumpReLUSAE":
-        params = np.load(path)
-        return cls.from_params({k: params[k] for k in params.files}, device, dtype)
+        with np.load(path, allow_pickle=False) as params:  # weights only; never run pickled code
+            return cls.from_params({k: params[k] for k in params.files}, device, dtype)
 
     @classmethod
     def from_safetensors(cls, path: str | Path, device="cpu", dtype=torch.float32) -> "JumpReLUSAE":
@@ -103,16 +114,17 @@ class JumpReLUSAE(torch.nn.Module):
 
     @classmethod
     def from_gemma_scope_1(cls, repo_id="google/gemma-scope-2b-pt-res", layer=20, width="16k", l0=71,
-                           device="cpu", token=None) -> "JumpReLUSAE":
+                           device="cpu", token=None, revision=None) -> "JumpReLUSAE":
         """Gemma Scope 1 (Gemma 2): layer_{layer}/width_{width}/average_l0_{l0}/params.npz"""
         from huggingface_hub import hf_hub_download
 
-        path = hf_hub_download(repo_id, f"layer_{layer}/width_{width}/average_l0_{l0}/params.npz", token=token)
-        return cls.from_npz(path, device=device)
+        path = hf_hub_download(repo_id, f"layer_{layer}/width_{width}/average_l0_{l0}/params.npz", token=token,
+                               revision=revision)
+        return cls.from_npz(path, device=device)._mark_source(path, revision)
 
     @classmethod
     def from_gemma_scope_2(cls, repo_id="google/gemma-scope-2-4b-it", layer=17, width="16k", l0="medium",
-                           site="resid_post", device="cpu", token=None) -> "JumpReLUSAE":
+                           site="resid_post", device="cpu", token=None, revision=None) -> "JumpReLUSAE":
         """Gemma Scope 2 (Gemma 3): {site}/layer_{layer}_width_{width}_l0_{l0}/params.safetensors
 
         The main resid_post folder has 4 layers per model (about 25, 50, 65 and
@@ -121,8 +133,14 @@ class JumpReLUSAE(torch.nn.Module):
         """
         from huggingface_hub import hf_hub_download
 
-        path = hf_hub_download(repo_id, f"{site}/layer_{layer}_width_{width}_l0_{l0}/params.safetensors", token=token)
-        return cls.from_safetensors(path, device=device)
+        path = hf_hub_download(repo_id, f"{site}/layer_{layer}_width_{width}_l0_{l0}/params.safetensors", token=token,
+                               revision=revision)
+        return cls.from_safetensors(path, device=device)._mark_source(path, revision)
+
+    def _mark_source(self, path, requested=None) -> "JumpReLUSAE":
+        """Remember which Hub commit the weights came from, for the trace's metadata."""
+        self.revision = snapshot_revision(path) or requested
+        return self
 
     # Backwards-compatible name used by version 1.
     from_hub = from_gemma_scope_1

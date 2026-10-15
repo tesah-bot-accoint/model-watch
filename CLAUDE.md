@@ -12,22 +12,24 @@ The owner wants to **observe the model while it runs**, not ablate or steer it, 
 
 ```bash
 pip install -r requirements.txt            # or: pip install -e .
-python -m unittest discover -s tests -v    # offline; tiny random Gemma 2, Gemma 3 text and Gemma 3 multimodal
+python -m unittest discover -s tests -v    # offline; tiny random Gemma 2, Gemma 3 text and Gemma 3 multimodal, plus a real HF tokenizer built in code
 python watch.py --prompt "Is AI a black box?"                   # needs HF_TOKEN + Gemma licenses accepted
 python watch.py --interactive --compact --html chat.html
+python watch.py --resume ~/.cache/model-watch/runs/<run>.jsonl --html run.html   # finish an interrupted reply
 ```
 
 The notebook `notebooks/model_watch.ipynb` is generated plain nbformat JSON; edit carefully and keep every code cell parseable.
 
 ## Layout
 
-- `model_watch/core.py`: `PRESETS`, `WatchConfig` (preset defaults fill any `None` field; `.resolved()`), `ModelWatcher` (`load`, `encode`, `step`, `watch`, `trace`, `add_labels`, `promotes`), `settled_layer`, `feature_key`.
+- `model_watch/core.py`: `PRESETS`, `WatchConfig` (preset defaults fill any `None` field; `.resolved()`), `ModelWatcher` (`load`, `encode`, `step`, `watch`, `trace`, `resume`, `add_labels`, `promotes`), `settled_layer`, `feature_key`, `TRACE_VERSION`.
+- `model_watch/graph.py`: `RunState` (typed per-run state), `Node`, `run_graph` (named nodes, edges as functions of the state, marks the state failed and re-raises on any error), `Checkpointer` (JSONL per run, 0600, deleted on success, pruned after 7 days), `load_checkpoint`.
 - `model_watch/sae.py`: `JumpReLUSAE`; `from_gemma_scope_1` (npz), `from_gemma_scope_2` (safetensors); `normalize_params` accepts key spellings like `w_enc`/`W_enc` and fixes transposed matrices using `b_dec`'s length.
-- `model_watch/labels.py`: `NeuronpediaLabels` (disk cache in `~/.cache/model-watch`, thread-safe, failures never cached, disables itself after 3 network failures).
+- `model_watch/labels.py`: `NeuronpediaLabels` (disk cache in `~/.cache/model-watch`, thread-safe, failures never cached, disables itself after 3 network failures and sets `auto_disabled`; `reset()` undoes that).
 - `model_watch/render.py`: `format_step` (terminal), `step_html` (notebook live panel), `describe`.
 - `model_watch/export.py`: `save_json`, `export_html`, `trace_to_html` (injects JSON at `/*__TRACE_JSON__*/null`).
-- `model_watch/viewer.html`: one-screen replay viewer; opened directly it shows an illustrative sample with a banner. Reads trace versions 1 and 2.
-- `watch.py`: CLI (`--preset`, `--interactive`, `--compact`, `--quiet`, `--device-map auto`, `--sae-layers`).
+- `model_watch/viewer.html`: one-screen replay viewer; opened directly it shows an illustrative sample with a banner. Reads trace versions 1 to 3.
+- `watch.py`: CLI (`--preset`, `--interactive`, `--compact`, `--quiet`, `--device-map auto`, `--sae-layers`, `--resume`, `--model-revision`, `--sae-revision`, `--no-checkpoint`).
 
 ## Decisions and gotchas
 
@@ -42,23 +44,35 @@ The notebook `notebooks/model_watch.ipynb` is generated plain nbformat JSON; edi
 - **Neuronpedia** sources verified to match the medium-L0 16k SAEs: `gemma-3-4b-it/17-gemmascope-2-res-16k`, `gemma-3-1b-it/13-...`, `gemma-3-12b-it/12-...`. Many 4B features have no explanation yet, which is why `promotes` (top tokens of `W_dec[f] @ W_U`) exists as a free label at every layer. API: `GET /api/feature/{model}/{source}/{index}`; response schema not verified, `parse_label` reads `explanations[0].description` with fallbacks.
 - Labels are fetched after generation by `add_labels` (parallel, capped, most-active first) so live display never waits on the network.
 - Stop tokens: tokenizer EOS plus `<end_of_turn>`. Steps carry `stop: true`; `reply` excludes them.
+- **`trace()` is a graph**: encode, then generate, then assemble, over one `RunState`. Generate checkpoints every word. On any error or Ctrl+C the exception is re-raised with `partial_trace` (marked `complete: false`) and `checkpoint` (a path `resume()` takes). `resume()` re-feeds prompt plus generated ids (valid because cache and recompute match) and gives the same result as an uninterrupted run. `watch()` is the bare generator with no checkpoints.
+- **Reply text** is `tok.decode(all reply ids)`, never a join of per-token decodes: Gemma's byte-fallback tokens decode to `�` one at a time.
+- **Exact chat history.** `trace(..., continue_from=previous_trace)` keeps the previous turn's `prompt_token_ids` and generated ids, and takes only the closing turn marker and the new message from a fresh encoding. If the messages don't extend the previous trace exactly, it falls back to plain encoding and sets `exact_history: false`. Tested on a real HF tokenizer built in code; not yet on Gemma's.
+- **Control tokens in messages** (`<start_of_turn>` typed by a user) are encoded as text via `apply_chat_template(sanitize_control_tokens=True)` (transformers 5.x). On older transformers, user/system messages containing them are refused with `ValueError`.
+- **Thread safety.** `_forward` holds a lock while its hooks are registered; concurrent traces take turns. `feature_info` on the watcher is a memo shared across runs (bounded by SAE size); each trace gets copies.
+- `promotes` for all new features in a word is one batched matmul (`_promotes_many`), so the unembedding is read once per word.
+- `add_labels` resets labelers that switched themselves off after failures (`auto_disabled`), never ones the caller turned off, and records each feature's `label_source`.
+- Revisions: `WatchConfig.model_revision` / `sae_revision` pin Hub revisions; the commit actually downloaded is recorded in `meta.model_revision` / `meta.sae_revisions`. Presets are not pinned (no verified commit hashes yet).
 - Tests must stay offline on tiny random models. Do not add tests that download weights.
 
-## Trace JSON (version 2)
+## Trace JSON (version 3)
 
 ```
-{ version: 2, created, prompt, messages|null, prompt_tokens, reply,
-  meta: {preset, model, sae, sae_layers, labeled_layers, neuronpedia_model, neuronpedia_sources, device, dtype, chat, n_layers},
+{ version: 3, created, complete, error|null, prompt, messages|null, prompt_tokens, prompt_token_ids,
+  exact_history,                                          # true/false when continue_from was given, else null
+  reply,
+  meta: {preset, model, model_revision, sae, sae_revisions, sae_layers, labeled_layers, neuronpedia_model,
+         neuronpedia_sources, device, dtype, chat, n_layers},
   steps: [ { index, token, token_id, prob, stop,
              alternatives: [{token, token_id, prob}],
              lens: [{layer, top_token, top_prob, chosen_prob}],
              settled_layer,                               # int or null
              features: {"<layer>": [{index, activation}]},
              active_count: {"<layer>": int} } ],
-  feature_info: {"<layer>:<index>": {layer, index, label|null, promotes: [str], url|null}} }
+  feature_info: {"<layer>:<index>": {layer, index, label|null, promotes: [str], url|null,
+                 label_source}} }   # cache | network | failed | not_looked_up, or null on unlabeled layers
 ```
 
-The viewer depends on these names; `normalize()` in `viewer.html` upgrades version 1 traces. If you change the schema, update the viewer and bump `version`.
+Version 3 only adds fields to version 2. The viewer depends on these names; `normalize()` in `viewer.html` upgrades version 1 traces, and a `complete: false` trace shows a "Partial reply" banner. If you change the schema, update the viewer and bump `version`.
 
 ## Known gaps
 

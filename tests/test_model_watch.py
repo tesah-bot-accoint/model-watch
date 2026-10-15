@@ -226,7 +226,7 @@ class TestWatcher(unittest.TestCase):
 
     def test_trace_is_json_ready(self):
         trace = make_watcher("gemma3").trace("hi", max_new_tokens=4, stop_at_eos=False)
-        self.assertEqual(trace["version"], 2)
+        self.assertEqual(trace["version"], 3)
         self.assertEqual([s["index"] for s in trace["steps"]], [0, 1, 2, 3])
         self.assertEqual(trace["meta"]["sae_layers"], [1, 4])
         self.assertEqual(trace["meta"]["labeled_layers"], [4])

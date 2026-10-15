@@ -187,6 +187,7 @@ tr.set td{background:var(--accent-soft)}
     <label class="open" for="file">Open trace.json<input id="file" type="file" accept=".json,application/json"></label>
   </header>
   <div class="banner" id="banner" hidden>Illustrative sample: made-up numbers and labels to show the layout. Run <span class="mono">watch.py --html</span> or the notebook to replay a real trace.</div>
+  <div class="banner" id="partial" hidden></div>
   <div class="err" id="err" role="alert" hidden></div>
 
   <main class="main">
@@ -367,6 +368,10 @@ function load(t){
   const labeled = trace.meta.labeled_layers || [];
   layerSel = String(labeled.find(l => layers.includes(l)) ?? layers[Math.floor(layers.length / 2)] ?? "");
   $("banner").hidden = !trace.meta.sample;
+  $("partial").hidden = trace.complete !== false;
+  $("partial").textContent = trace.complete === false
+    ? `Partial reply: generation stopped after ${trace.steps.length} words${trace.error ? " (" + trace.error + ")" : ""}. Everything up to there is shown.`
+    : "";
   $("err").hidden = true;
   const m = trace.meta, bits = [];
   if (m.model) bits.push(m.model);

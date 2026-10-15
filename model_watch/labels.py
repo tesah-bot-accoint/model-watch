@@ -61,6 +61,7 @@ class NeuronpediaLabels:
         self.api_key = api_key or os.environ.get("NEURONPEDIA_API_KEY")
         self.max_failures = max_failures
         self.log = log
+        self.auto_disabled = False  # switched off by failures (not by the caller); reset() turns it back on
         self._failures = 0
         self._lock = threading.Lock()
         self._path = _cache_dir() / f"labels-{model_id}-{source_id}.json"
@@ -96,6 +97,12 @@ class NeuronpediaLabels:
     def save(self) -> None:
         self._save()
 
+    def reset(self) -> None:
+        """Give Neuronpedia another chance after it was switched off by failures. Caller choices are kept."""
+        with self._lock:
+            if self.auto_disabled:
+                self.enabled, self.auto_disabled, self._failures = True, False, 0
+
     def _fetch(self, index: int) -> tuple[bool, str | None]:
         url = API.format(model=self.model_id, source=self.source_id, index=index)
         headers = {"Accept": "application/json", "User-Agent": "model-watch"}
@@ -104,7 +111,8 @@ class NeuronpediaLabels:
         try:
             with urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=self.timeout) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
-            self._failures = 0
+            with self._lock:
+                self._failures = 0
             return True, parse_label(data)
         except urllib.error.HTTPError as err:
             if err.code == 404:  # feature exists but has no page data: a real "no label"
@@ -117,7 +125,7 @@ class NeuronpediaLabels:
         with self._lock:
             self._failures += 1
             if self._failures >= self.max_failures and self.enabled:
-                self.enabled = False
+                self.enabled, self.auto_disabled = False, True
                 self.log(f"[labels] Neuronpedia unreachable ({err}); continuing without its labels.")
         return False, None
 
