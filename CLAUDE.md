@@ -13,7 +13,7 @@ The owner wants to **observe the model while it runs**, not ablate or steer it, 
 ```bash
 pip install -r requirements.txt            # or: pip install -e .
 python -m unittest discover -s tests -v    # offline; tiny random Gemma 2, Gemma 3 text and Gemma 3 multimodal, plus a real HF tokenizer built in code
-python watch.py --prompt "Is AI a black box?"                   # needs HF_TOKEN + Gemma licenses accepted
+python watch.py --prompt "Is AI a black box?"                   # no login needed; HF_TOKEN optional
 python watch.py --interactive --compact --html chat.html
 python watch.py --resume ~/.cache/model-watch/runs/<run>.jsonl --html run.html   # finish an interrupted reply
 ```
@@ -52,6 +52,7 @@ The notebook `notebooks/model_watch.ipynb` is generated plain nbformat JSON; edi
 - `promotes` for all new features in a word is one batched matmul (`_promotes_many`), so the unembedding is read once per word.
 - `add_labels` resets labelers that switched themselves off after failures (`auto_disabled`), never ones the caller turned off, and records each feature's `label_source`.
 - Revisions: `WatchConfig.model_revision` / `sae_revision` pin Hub revisions; the commit actually downloaded is recorded in `meta.model_revision` / `meta.sae_revisions`. Presets are not pinned (no verified commit hashes yet).
+- **No login.** The owner doesn't want anyone to need another account. Presets list `model_mirrors` / `sae_mirrors` (public copies). `first_available()` tries the official repo, then each copy, moving on only when `needs_login()` says the error means a login or license click (`GatedRepoError`, `RepositoryNotFoundError`, HTTP 401/403); any other error is raised. If every source needs a login it raises `LoginRequired` with a plain message. `load()` prints the Gemma Terms of Use link, and `meta.model_source` / `meta.sae_sources` record what was used. The mirror names (`unsloth/...`) were not verified (Hugging Face unreachable from the sandbox). Don't reintroduce `notebook_login()` or a required token.
 - Tests must stay offline on tiny random models. Do not add tests that download weights.
 
 ## Trace JSON (version 3)
@@ -60,7 +61,7 @@ The notebook `notebooks/model_watch.ipynb` is generated plain nbformat JSON; edi
 { version: 3, created, complete, error|null, prompt, messages|null, prompt_tokens, prompt_token_ids,
   exact_history,                                          # true/false when continue_from was given, else null
   reply,
-  meta: {preset, model, model_revision, sae, sae_revisions, sae_layers, labeled_layers, neuronpedia_model,
+  meta: {preset, model, model_source, model_revision, sae, sae_sources, sae_revisions, sae_layers, labeled_layers, neuronpedia_model,
          neuronpedia_sources, device, dtype, chat, n_layers},
   steps: [ { index, token, token_id, prob, stop,
              alternatives: [{token, token_id, prob}],

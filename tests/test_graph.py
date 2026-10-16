@@ -21,7 +21,7 @@ import torch
 from test_model_watch import TEXT, FakeTokenizer, make_watcher, random_sae, tiny  # noqa: E402
 
 from model_watch import JumpReLUSAE, ModelWatcher, WatchConfig  # noqa: E402
-from model_watch.core import _load_model  # noqa: E402
+from model_watch.core import LoginRequired, _load_model, first_available, needs_login  # noqa: E402
 from model_watch.graph import Checkpointer, Node, RunState, load_checkpoint, run_graph  # noqa: E402
 from model_watch.sae import snapshot_revision  # noqa: E402
 
@@ -435,6 +435,103 @@ class TestInputChecks(unittest.TestCase):
                 w.encode(bad)
         record, _ = w.step(torch.tensor([2, 5, 6]))  # 1-D ids are accepted as one sequence
         self.assertIn("token", record)
+
+
+class TestNoLogin(unittest.TestCase):
+    """Nobody should need a Hugging Face account: gated repos fall back to public copies."""
+
+    def gated(self, repo):
+        from huggingface_hub.errors import GatedRepoError
+
+        response = SimpleNamespace(headers={}, status_code=403, request=None)
+        try:
+            raise GatedRepoError(f"Access to model {repo} is restricted.", response=response)
+        except GatedRepoError as inner:
+            try:  # transformers wraps Hub errors in OSError
+                raise OSError(f"You are trying to access a gated repo. {repo}") from inner
+            except OSError as outer:
+                return outer
+
+    def test_needs_login(self):
+        self.assertTrue(needs_login(self.gated("google/x")))
+        self.assertTrue(needs_login(OSError("401 Client Error: Unauthorized for url")))
+        self.assertFalse(needs_login(OSError("No space left on device")))
+        self.assertFalse(needs_login(ValueError("bad dtype")))
+
+    def test_falls_back_to_public_copy_and_says_so(self):
+        logs = []
+
+        def open_one(repo):
+            if repo.startswith("google/"):
+                raise self.gated(repo)
+            return f"weights from {repo}"
+
+        source, result = first_available(["google/gemma", "public/gemma"], open_one, "the model", logs.append)
+        self.assertEqual((source, result), ("public/gemma", "weights from public/gemma"))
+        self.assertIn("public/gemma", logs[0])
+
+    def test_official_repo_used_when_it_works(self):
+        tried = []
+        source, _ = first_available(["google/gemma", "public/gemma"], lambda r: tried.append(r), "the model")
+        self.assertEqual((source, tried), ("google/gemma", ["google/gemma"]))
+
+    def test_real_errors_are_not_hidden_by_the_fallback(self):
+        def open_one(repo):
+            raise OSError("No space left on device")
+
+        with self.assertRaises(OSError):
+            first_available(["google/gemma", "public/gemma"], open_one, "the model")
+
+    def test_plain_message_when_every_source_needs_login(self):
+        with self.assertRaises(LoginRequired) as ctx:
+            first_available(["google/a", "google/b"], lambda r: (_ for _ in ()).throw(self.gated(r)), "the model",
+                            lambda *_: None)
+        self.assertIn("google/a, google/b", str(ctx.exception))
+        self.assertIn("HF_TOKEN", str(ctx.exception))
+
+    def test_presets_have_public_copies_only_for_their_own_repos(self):
+        for name in ("gemma-3-1b-it", "gemma-3-4b-it", "gemma-3-12b-it", "gemma-2-2b"):
+            cfg = WatchConfig(preset=name).resolved()
+            self.assertTrue(cfg.model_mirrors, name)
+            self.assertNotIn(cfg.model_id, cfg.model_mirrors)
+        mine = WatchConfig(model_id="me/my-model").resolved()
+        self.assertEqual(mine.model_mirrors, ())
+        chosen = WatchConfig(model_id="me/my-model", model_mirrors=("me/copy",)).resolved()
+        self.assertEqual(chosen.model_mirrors, ("me/copy",))
+
+    def test_load_without_token_uses_public_copy(self):
+        import transformers
+
+        w = make_watcher("gemma3", chat=True)
+        calls = []
+
+        def tokenizer(repo, **kw):
+            calls.append(("tok", repo, kw.get("token")))
+            if repo.startswith("google/"):
+                raise self.gated(repo)
+            return w.tok
+
+        def model(repo, **kw):
+            calls.append(("model", repo))
+            return w.model
+
+        def sae(repo, layer, *a, **kw):
+            calls.append(("sae", repo, layer))
+            return random_sae(layer)
+
+        cfg = WatchConfig(preset="gemma-3-1b-it", sae_layers=(1, 4), device="cpu", labels=False, checkpoints=False)
+        with mock.patch.object(transformers.AutoTokenizer, "from_pretrained", side_effect=tokenizer), \
+                mock.patch.object(transformers.AutoModelForCausalLM, "from_pretrained", side_effect=model), \
+                mock.patch.object(JumpReLUSAE, "from_gemma_scope_2", side_effect=sae):
+            logs = []
+            loaded = ModelWatcher.load(cfg, hf_token=None, log=logs.append)
+        self.assertEqual(loaded.meta["model_source"], "unsloth/gemma-3-1b-it")
+        self.assertEqual(loaded.meta["model"], "google/gemma-3-1b-it")
+        self.assertEqual(loaded.meta["sae_sources"], {"1": "google/gemma-scope-2-1b-it", "4": "google/gemma-scope-2-1b-it"})
+        self.assertIn(("tok", "google/gemma-3-1b-it", None), calls)
+        self.assertTrue(any("Gemma Terms of Use" in line for line in logs))
+        self.assertTrue(any("public copy" in line for line in logs))
+        self.assertEqual(len(loaded.trace([{"role": "user", "content": "hi"}], 2)["steps"]), 2)
 
 
 @unittest.skipUnless(HAVE_REAL_TOKENIZER, "needs jinja2 and tokenizers")

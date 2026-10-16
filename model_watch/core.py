@@ -44,24 +44,33 @@ ROLES = ("system", "user", "assistant")
 Messages = list  # [{"role": "user" | "assistant", "content": str}, ...]
 
 # Verified against the Hugging Face repos and Neuronpedia, October 2026.
+# Google's Gemma repos need a Hugging Face login (a license click). So nobody has to log in, each preset also
+# lists public copies of the same files (model_mirrors, sae_mirrors), tried in order only when the official repo
+# asks for a login. The copies were chosen from memory and could not be checked from the development sandbox
+# (Hugging Face was unreachable); README "Known gaps" says so.
+GEMMA_TERMS = "https://ai.google.dev/gemma/terms"
 PRESETS: dict[str, dict] = {
     "gemma-3-1b-it": dict(
-        model_id="google/gemma-3-1b-it", sae_repo="google/gemma-scope-2-1b-it", sae_format="gemma-scope-2",
+        model_id="google/gemma-3-1b-it", model_mirrors=("unsloth/gemma-3-1b-it",),
+        sae_repo="google/gemma-scope-2-1b-it", sae_mirrors=(), sae_format="gemma-scope-2",
         sae_layers=(7, 13, 17, 22), sae_width="16k", sae_l0="medium", chat=True,
         neuronpedia_model="gemma-3-1b-it", neuronpedia_sources={13: "13-gemmascope-2-res-16k"},
     ),
     "gemma-3-4b-it": dict(
-        model_id="google/gemma-3-4b-it", sae_repo="google/gemma-scope-2-4b-it", sae_format="gemma-scope-2",
+        model_id="google/gemma-3-4b-it", model_mirrors=("unsloth/gemma-3-4b-it",),
+        sae_repo="google/gemma-scope-2-4b-it", sae_mirrors=(), sae_format="gemma-scope-2",
         sae_layers=(9, 17, 22, 29), sae_width="16k", sae_l0="medium", chat=True,
         neuronpedia_model="gemma-3-4b-it", neuronpedia_sources={17: "17-gemmascope-2-res-16k"},
     ),
     "gemma-3-12b-it": dict(
-        model_id="google/gemma-3-12b-it", sae_repo="google/gemma-scope-2-12b-it", sae_format="gemma-scope-2",
+        model_id="google/gemma-3-12b-it", model_mirrors=("unsloth/gemma-3-12b-it",),
+        sae_repo="google/gemma-scope-2-12b-it", sae_mirrors=(), sae_format="gemma-scope-2",
         sae_layers=(12, 24, 31, 41), sae_width="16k", sae_l0="medium", chat=True,
         neuronpedia_model="gemma-3-12b-it", neuronpedia_sources={12: "12-gemmascope-2-res-16k"},
     ),
     "gemma-2-2b": dict(
-        model_id="google/gemma-2-2b", sae_repo="google/gemma-scope-2b-pt-res", sae_format="gemma-scope-1",
+        model_id="google/gemma-2-2b", model_mirrors=("unsloth/gemma-2-2b",),
+        sae_repo="google/gemma-scope-2b-pt-res", sae_mirrors=(), sae_format="gemma-scope-1",
         sae_layers=(20,), sae_width="16k", sae_l0=71, chat=False,
         neuronpedia_model="gemma-2-2b", neuronpedia_sources={20: "20-gemmascope-res-16k"},
     ),
@@ -74,7 +83,9 @@ class WatchConfig:
     preset: str = DEFAULT_PRESET
     # Anything left as None comes from the preset.
     model_id: Optional[str] = None
+    model_mirrors: Optional[tuple] = None  # public copies tried when model_id needs a login
     sae_repo: Optional[str] = None
+    sae_mirrors: Optional[tuple] = None  # same, for sae_repo
     sae_format: Optional[str] = None  # "gemma-scope-2" or "gemma-scope-1"
     sae_layers: Optional[tuple] = None
     sae_width: Optional[str] = None
@@ -98,7 +109,13 @@ class WatchConfig:
             raise ValueError(f"Unknown preset {self.preset!r}. Choose from: {', '.join(PRESETS)}")
         base = PRESETS[self.preset]
         updates = {f.name: base[f.name] for f in fields(self) if getattr(self, f.name) is None and f.name in base}
+        # A preset's public copies belong to the preset's repos; don't try them for a repo you chose yourself.
+        for repo, mirrors in (("model_id", "model_mirrors"), ("sae_repo", "sae_mirrors")):
+            if getattr(self, mirrors) is None and getattr(self, repo) not in (None, base.get(repo)):
+                updates[mirrors] = ()
         cfg = replace(self, **updates)
+        cfg.model_mirrors = tuple(cfg.model_mirrors or ())
+        cfg.sae_mirrors = tuple(cfg.sae_mirrors or ())
         cfg.sae_layers = tuple(int(x) for x in (cfg.sae_layers or ()))
         cfg.neuronpedia_sources = {int(k): v for k, v in (cfg.neuronpedia_sources or {}).items()}
         return cfg
@@ -257,25 +274,33 @@ class ModelWatcher:
         dtype = pick_dtype(cfg.dtype, device)
         dtype_name = str(dtype).replace("torch.", "")
         log(f"Loading {cfg.model_id} ({dtype_name}, {'split across GPUs' if cfg.device_map else device})...")
-        tokenizer = AutoTokenizer.from_pretrained(cfg.model_id, token=hf_token, revision=cfg.model_revision)
+        if "gemma" in cfg.model_id.lower():
+            log(f"Gemma is Google's model, provided under the Gemma Terms of Use ({GEMMA_TERMS}). "
+                "Using it means agreeing to them.")
         kwargs = {"token": hf_token, "revision": cfg.model_revision, "attn_implementation": "eager",
                   _dtype_kwarg(): dtype}
         if cfg.device_map:
             kwargs["device_map"] = cfg.device_map
-        model = _load_model(transformers, cfg.model_id, kwargs)
+
+        def open_model(repo):
+            tok = AutoTokenizer.from_pretrained(repo, token=hf_token, revision=cfg.model_revision)
+            return tok, _load_model(transformers, repo, kwargs)
+
+        model_source, (tokenizer, model) = first_available((cfg.model_id, *cfg.model_mirrors), open_model,
+                                                           "the model", log)
         if not cfg.device_map:
             model = model.to(device)
         home = model.get_output_embeddings().weight.device
 
-        saes = {}
+        saes, sae_sources = {}, {}
+        loader = JumpReLUSAE.from_gemma_scope_2 if cfg.sae_format == "gemma-scope-2" else JumpReLUSAE.from_gemma_scope_1
         for layer in cfg.sae_layers:
             log(f"Loading concept dictionary for layer {layer}...")
-            if cfg.sae_format == "gemma-scope-2":
-                saes[layer] = JumpReLUSAE.from_gemma_scope_2(cfg.sae_repo, layer, cfg.sae_width, cfg.sae_l0,
-                                                             device=home, token=hf_token, revision=cfg.sae_revision)
-            else:
-                saes[layer] = JumpReLUSAE.from_gemma_scope_1(cfg.sae_repo, layer, cfg.sae_width, cfg.sae_l0,
-                                                             device=home, token=hf_token, revision=cfg.sae_revision)
+            sae_sources[str(layer)], saes[layer] = first_available(
+                (cfg.sae_repo, *cfg.sae_mirrors),
+                lambda repo: loader(repo, layer, cfg.sae_width, cfg.sae_l0, device=home, token=hf_token,
+                                    revision=cfg.sae_revision),
+                f"the concept dictionary for layer {layer}", log)
         labelers = {
             layer: NeuronpediaLabels(cfg.neuronpedia_model, source, enabled=cfg.labels, log=log)
             for layer, source in cfg.neuronpedia_sources.items()
@@ -284,8 +309,10 @@ class ModelWatcher:
         meta = {
             "preset": cfg.preset,
             "model": cfg.model_id,
+            "model_source": model_source,
             "model_revision": getattr(model.config, "_commit_hash", None) or cfg.model_revision,
             "sae": f"{cfg.sae_repo} ({cfg.sae_format}, width {cfg.sae_width}, L0 {cfg.sae_l0})",
+            "sae_sources": sae_sources,
             "sae_revisions": {str(layer): getattr(sae, "revision", None) for layer, sae in saes.items()},
             "sae_layers": list(cfg.sae_layers),
             "neuronpedia_model": cfg.neuronpedia_model,
@@ -744,6 +771,54 @@ def _as_batch_of_one(ids) -> torch.Tensor:
     return ids
 
 
+class LoginRequired(RuntimeError):
+    """Every source for a download wants a Hugging Face login."""
+
+
+_LOGIN_HINTS = ("gated repo", "is restricted", "must be authenticated", "unauthorized", "401 client error",
+                "403 client error", "access to model", "awaiting a review")
+
+
+def needs_login(err: BaseException) -> bool:
+    """True when a download failed because the repo wants a login or license click (or isn't public)."""
+    from huggingface_hub.errors import GatedRepoError, RepositoryNotFoundError
+
+    seen = set()
+    while err is not None and id(err) not in seen:
+        seen.add(id(err))
+        if isinstance(err, (GatedRepoError, RepositoryNotFoundError)):  # private repos look "not found" anonymously
+            return True
+        if getattr(getattr(err, "response", None), "status_code", None) in (401, 403):
+            return True
+        if any(hint in str(err).lower() for hint in _LOGIN_HINTS):
+            return True
+        err = err.__cause__ or err.__context__
+    return False
+
+
+def first_available(sources, open_one, what: str, log=print):
+    """Open the first source that works without a login. Returns (source, result).
+
+    Only "needs a login" errors move on to the next source; any other error is real and is raised at once.
+    """
+    sources = [s for s in dict.fromkeys(sources) if s]
+    failed = []
+    for i, source in enumerate(sources):
+        try:
+            return source, open_one(source)
+        except Exception as err:
+            if not needs_login(err):
+                raise
+            failed.append((source, err))
+            if i + 1 < len(sources):
+                log(f"{source} asks for a Hugging Face login; using the public copy {sources[i + 1]} instead.")
+    names = ", ".join(source for source, _ in failed)
+    raise LoginRequired(
+        f"Couldn't download {what} without a Hugging Face login ({names} asked for one). Either add a public "
+        "copy to model_mirrors / sae_mirrors, or set HF_TOKEN to use your own Hugging Face account."
+    ) from (failed[-1][1] if failed else None)
+
+
 def _load_model(transformers, model_id: str, kwargs: dict):
     """Try the text-only auto class, then the multimodal one, keeping each one's error if both fail."""
     errors = []
@@ -761,4 +836,5 @@ def _load_model(transformers, model_id: str, kwargs: dict):
 
 
 __all__ = ["WatchConfig", "ModelWatcher", "PRESETS", "DEFAULT_PRESET", "settled_layer", "feature_key",
-           "pick_device", "pick_dtype", "TRACE_VERSION"]
+           "pick_device", "pick_dtype", "TRACE_VERSION", "GEMMA_TERMS", "LoginRequired", "first_available",
+           "needs_login"]

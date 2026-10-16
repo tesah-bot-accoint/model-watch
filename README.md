@@ -16,25 +16,26 @@ It only observes. Nothing inside the model is switched off or changed.
 
 | Where | Setup | Model |
 |---|---|---|
-| Google Colab | Open `notebooks/model_watch.ipynb`, Runtime → T4 GPU | Gemma 3 4B chat (default) |
+| Google Colab | Open `notebooks/model_watch.ipynb`, Runtime → T4 GPU (Colab itself needs a Google account) | Gemma 3 4B chat (default) |
 | Kaggle | Same notebook; Accelerator → GPU T4 x2, Internet on (needs a phone-verified account) | Gemma 3 4B, or 12B split across both GPUs |
 | Your own Linux machine | `python watch.py ...` | Any preset your hardware fits |
 | No GPU at all | `python watch.py --preset gemma-3-1b-it --device cpu ...` | Gemma 3 1B chat (slow, works) |
 
-### One-time Hugging Face setup
+Running on your own computer needs no account of any kind.
 
-Gemma is gated. Before the first run:
+### No login needed
 
-1. Accept the license on the model page, for example <https://huggingface.co/google/gemma-3-4b-it>, and on the matching Gemma Scope 2 repo if asked, for example <https://huggingface.co/google/gemma-scope-2-4b-it>.
-2. Create a read token at <https://huggingface.co/settings/tokens>.
-3. Provide it as `HF_TOKEN`: `export HF_TOKEN=hf_...` in a terminal, or a notebook secret named `HF_TOKEN` (Colab: key icon; Kaggle: Add-ons → Secrets).
+You don't need a Hugging Face account. Google's own copy of Gemma asks for a Hugging Face login, so when it does, Model Watch downloads a public copy of the same files instead and prints which one it used. Each trace records where its files came from (`model_source`, `sae_sources`).
+
+Gemma is Google's model, provided under the [Gemma Terms of Use](https://ai.google.dev/gemma/terms). Using it, from any copy, means agreeing to those terms. Model Watch prints this link each time it loads Gemma.
+
+Optional: if you have a Hugging Face account and have accepted the Gemma license there, set `HF_TOKEN` (`export HF_TOKEN=hf_...`, or a notebook secret named `HF_TOKEN`) to download from Google's own copy.
 
 ### Terminal
 
 ```bash
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-export HF_TOKEN=hf_...
 
 python watch.py --prompt "Is AI a black box?"                       # full live view
 python watch.py --prompt "Is AI a black box?" --compact             # choice + concepts only
@@ -118,6 +119,7 @@ Everything has been tested on tiny, randomly built versions of Gemma 2 and Gemma
 - **Dictionary file format.** The concept dictionaries are Google's files. If their internal names differ from what the loader expects, the error message lists them, and the fix is one line in `model_watch/sae.py`.
 - **12B on two GPUs.** Splitting the 12B model across two GPUs (Kaggle) is written but untested.
 - **Conversation handling.** Giving the model back its exact words between turns, and treating typed turn markers as text, were tested with a small stand-in that works like Gemma's tokenizer (the part that splits text into tokens), not with Gemma's own. If the exact words can't be lined up, Model Watch falls back to the old way of rebuilding the conversation from text, and the trace records which way was used (`exact_history`). The turn-marker protection needs `transformers` 5 or newer; on older versions, a message that contains a turn marker is refused.
+- **Public copies.** The public copies the presets fall back to (for example `unsloth/gemma-3-4b-it`) were chosen from memory. They couldn't be checked from where this was built, because Hugging Face was blocked there. Before relying on them, check that they open without a login and match Google's files. Google's concept dictionaries (Gemma Scope) don't have a public copy listed yet. If they turn out to need a login, Model Watch stops with a plain message saying so, instead of falling back.
 - **Exact versions.** The presets download the newest version of each model file. Use `--model-revision`/`--sae-revision` to choose an exact version. Every trace records the version it actually used, so you can repeat a run.
 
 ### Closest stand-ins for the big closed models
